@@ -150,8 +150,14 @@ def evaluate_policy(case: dict, action_type: str, actions: list, settings: dict,
 
         conf = case.get("confidence")
         conf_threshold = float(settings.get("confidence_threshold", 0.55))
-        if spec.get("money_touching") and conf is not None and conf < conf_threshold:
-            approvals.append({"rule": "LOW_CONFIDENCE_REVIEW", "detail": f"Model confidence {conf} is below threshold {conf_threshold}"})
+        if spec.get("money_touching"):
+            if conf is None:
+                approvals.append({
+                    "rule": "LOW_CONFIDENCE_REVIEW",
+                    "detail": "No calibrated model confidence available (heuristic assessment only); money-moving actions require human approval",
+                })
+            elif conf < conf_threshold:
+                approvals.append({"rule": "LOW_CONFIDENCE_REVIEW", "detail": f"Model confidence {conf} is below threshold {conf_threshold}"})
 
         dnc = settings.get("do_not_contact_customers") or []
         if action_type in ("CUSTOMER_REMINDER", "SEND_RECOVERY_LINK") and case.get("customer_reference") in dnc:

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="1.048" timestamp="2026-08-28T13:44:51.631539+00:00" hostname="agent-env-ecb5bc98-a989-473d-a347-265d0c113d47"><testcase classname="tests.test_dashboard_overhaul.TestConfidence" name="test_no_fake_confidence_on_heuristic_cases" time="0.389"><failure message="AssertionError: 32 legacy heuristic cases still return the fake 0.5 confidence placeholder via API (not backfilled): [('case_2d2224c79ecf', 0.5, None), ('case_6242deabf52d', 0.5, None), ('case_fee160101126', 0.5, None), ('case_e69dea5d87b6', 0.5, None), ('case_1f7a1de04708', 0.5, None)]&#10;assert not [('case_2d2224c79ecf', 0.5, None), ('case_6242deabf52d', 0.5, None), ('case_fee160101126', 0.5, None), ('case_e69dea5d87b6', 0.5, None), ('case_1f7a1de04708', 0.5, None), ('case_6beb73c12728', 0.5, None), ...]">self = &lt;test_dashboard_overhaul.TestConfidence object at 0xfa8da4515b90&gt;
+client = &lt;requests.sessions.Session object at 0xfa8da42f0390&gt;
+
+    def test_no_fake_confidence_on_heuristic_cases(self, client):
+        """Heuristic-analyzed cases must expose confidence=None + confidence_type='heuristic'.
+        Legacy records written before the fix still carry the fake 0.5 placeholder."""
+        r = client.get(f"{BASE_URL}/api/cases", params={"limit": 500}, timeout=120)
+        cases = r.json()["cases"]
+        stale_heuristic, ok_heuristic, llm_missing_type, llm_ok = [], 0, [], 0
+        for c in cases:
+            mv = c.get("model_version")
+            if not mv:
+                continue
+            if "heuristic" in mv:
+                if c.get("confidence") is None and c.get("confidence_type") == "heuristic":
+                    ok_heuristic += 1
+                else:
+                    stale_heuristic.append((c["case_id"], c.get("confidence"), c.get("confidence_type")))
+            else:
+                if c.get("confidence_type") == "model_uncalibrated":
+                    llm_ok += 1
+                else:
+                    llm_missing_type.append((c["case_id"], c.get("confidence"), c.get("confidence_type")))
+        print(f"heuristic_ok={ok_heuristic} heuristic_stale={len(stale_heuristic)} "
+              f"llm_ok={llm_ok} llm_missing_confidence_type={len(llm_missing_type)}")
+&gt;       assert not stale_heuristic, (
+            f"{len(stale_heuristic)} legacy heuristic cases still return the fake 0.5 confidence "
+            f"placeholder via API (not backfilled): {stale_heuristic[:5]}")
+E       AssertionError: 32 legacy heuristic cases still return the fake 0.5 confidence placeholder via API (not backfilled): [('case_2d2224c79ecf', 0.5, None), ('case_6242deabf52d', 0.5, None), ('case_fee160101126', 0.5, None), ('case_e69dea5d87b6', 0.5, None), ('case_1f7a1de04708', 0.5, None)]
+E       assert not [('case_2d2224c79ecf', 0.5, None), ('case_6242deabf52d', 0.5, None), ('case_fee160101126', 0.5, None), ('case_e69dea5d87b6', 0.5, None), ('case_1f7a1de04708', 0.5, None), ('case_6beb73c12728', 0.5, None), ...]
+
+tests/test_dashboard_overhaul.py:297: AssertionError</failure></testcase><testcase classname="tests.test_dashboard_overhaul.TestConfidence" name="test_review_queue_no_bare_50pct" time="0.058"><failure message="AssertionError: review queue cases still carry heuristic confidence values: ['case_2d2224c79ecf', 'case_fee160101126', 'case_e69dea5d87b6', 'case_1f7a1de04708', 'case_6beb73c12728']&#10;assert not ['case_2d2224c79ecf', 'case_fee160101126', 'case_e69dea5d87b6', 'case_1f7a1de04708', 'case_6beb73c12728', 'case_00dff3f1e1d9', ...]">self = &lt;test_dashboard_overhaul.TestConfidence object at 0xfa8da4425050&gt;
+client = &lt;requests.sessions.Session object at 0xfa8da42f0390&gt;
+
+    def test_review_queue_no_bare_50pct(self, client):
+        r = client.get(f"{BASE_URL}/api/review/queue", timeout=120)
+        assert r.status_code == 200
+        bad = [c["case_id"] for c in r.json()["approval_pending"]
+               if c.get("model_version") and "heuristic" in c["model_version"] and c.get("confidence") is not None]
+&gt;       assert not bad, f"review queue cases still carry heuristic confidence values: {bad[:5]}"
+E       AssertionError: review queue cases still carry heuristic confidence values: ['case_2d2224c79ecf', 'case_fee160101126', 'case_e69dea5d87b6', 'case_1f7a1de04708', 'case_6beb73c12728']
+E       assert not ['case_2d2224c79ecf', 'case_fee160101126', 'case_e69dea5d87b6', 'case_1f7a1de04708', 'case_6beb73c12728', 'case_00dff3f1e1d9', ...]
+
+tests/test_dashboard_overhaul.py:309: AssertionError</failure></testcase></testsuite></testsuites>

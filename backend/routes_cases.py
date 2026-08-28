@@ -2,10 +2,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from audit import write_audit
 from auth import get_current_user
-from constants import CLOSED_CASE_STATUSES, mask_reference, now_iso
+from constants import CLOSED_CASE_STATUSES, OPEN_CASE_STATUSES, mask_reference, now_iso
 from database import db, get_settings
 from detection import run_case_pipeline, verify_case
 from execution import execute_action
+from metrics import FUNNEL_STAGES, compute_funnel, enrich_case
 from policy import ACTION_CATALOG, evaluate_policy
 
 router = APIRouter(tags=["cases"])
@@ -55,9 +56,27 @@ def _mask_case(case: dict) -> dict:
     return case
 
 
+def _sort_cases(cases: list, sort: str) -> list:
+    if sort == "oldest":
+        return sorted(cases, key=lambda c: c.get("created_at") or "")
+    if sort in ("amount_desc", "amount_asc"):
+        # Never blend currencies: group by currency, sort within each group.
+        reverse = sort == "amount_desc"
+        groups = {}
+        for case in cases:
+            groups.setdefault(case.get("currency") or "UNKNOWN", []).append(case)
+        ordered = []
+        for currency in sorted(groups):
+            ordered.extend(sorted(groups[currency], key=lambda c: float(c.get("amount_at_risk") or 0), reverse=reverse))
+        return ordered
+    return sorted(cases, key=lambda c: c.get("created_at") or "", reverse=True)
+
+
 @router.get("/cases")
 async def list_cases(request: Request, status: str | None = None, outcome: str | None = None,
-                     policy: str | None = None, q: str | None = None, limit: int = 200):
+                     policy: str | None = None, q: str | None = None, stage: str | None = None,
+                     source: str | None = None, attributed_action: str | None = None,
+                     sort: str = "newest", limit: int = 200):
     await get_current_user(request)
     query = {}
     if status:
@@ -66,14 +85,36 @@ async def list_cases(request: Request, status: str | None = None, outcome: str |
         query["outcome"] = outcome
     if policy:
         query["policy_result.decision"] = policy
+    if attributed_action:
+        query["attributed_action"] = attributed_action
     if q:
         query["$or"] = [
             {"case_id": {"$regex": q, "$options": "i"}},
             {"order_key": {"$regex": q, "$options": "i"}},
+            {"title": {"$regex": q, "$options": "i"}},
             {"payment_attempt_ids": {"$regex": q, "$options": "i"}},
         ]
-    cases = await db.recovery_cases.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 500))
-    return {"cases": [_mask_case(c) for c in cases]}
+    if stage:
+        if stage in FUNNEL_STAGES:
+            all_cases = await db.recovery_cases.find({}, {"_id": 0}).to_list(10000)
+            all_actions = await db.recovery_actions.find({}, {"_id": 0}).to_list(10000)
+            audit_executed = await db.audit_events.distinct("case_id", {"event_type": "ACTION_EXECUTED", "case_id": {"$ne": None}})
+            funnel = compute_funnel(all_cases, all_actions, set(audit_executed))
+            query["case_id"] = {"$in": list(funnel["sets"][stage])}
+        elif stage == "at_risk":
+            query["status"] = {"$in": OPEN_CASE_STATUSES}
+        elif stage in ("stopped", "invalid"):
+            query["status"] = stage.upper()
+        elif stage == "blocked":
+            query["status"] = {"$in": OPEN_CASE_STATUSES}
+            query["policy_result.decision"] = "BLOCK"
+
+    cases = await db.recovery_cases.find(query, {"_id": 0}).to_list(5000)
+    enriched = [_mask_case(enrich_case(c)) for c in cases]
+    if source:
+        enriched = [c for c in enriched if c["source_category"] == source]
+    enriched = _sort_cases(enriched, sort)
+    return {"cases": enriched[: min(limit, 500)]}
 
 
 @router.get("/cases/{case_id}")
@@ -90,7 +131,7 @@ async def get_case(case_id: str, request: Request):
     for a in attempts:
         if a.get("customer_reference"):
             a["customer_reference"] = mask_reference(a["customer_reference"])
-    return {"case": _mask_case(case), "attempts": attempts, "actions": actions, "audit_trail": audit}
+    return {"case": _mask_case(enrich_case(case)), "attempts": attempts, "actions": actions, "audit_trail": audit}
 
 
 @router.get("/cases/{case_id}/replay")
@@ -246,7 +287,7 @@ async def review_queue(request: Request):
     pending = await db.recovery_cases.find({"status": "APPROVAL_PENDING"}, {"_id": 0}).sort("created_at", -1).to_list(100)
     exceptions = await db.exceptions.find({"status": "OPEN"}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return {
-        "approval_pending": [_mask_case(c) for c in pending],
+        "approval_pending": [_mask_case(enrich_case(c)) for c in pending],
         "exceptions": exceptions,
         "counts": {"approval_pending": len(pending), "exceptions": len(exceptions)},
     }

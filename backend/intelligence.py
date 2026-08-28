@@ -194,6 +194,11 @@ async def analyze_case(case: dict, attempts: list, allow_llm: bool = True) -> di
     Financial arithmetic (expected incremental value) is always deterministic.
     Probabilities come from Claude Sonnet when available, else the deterministic
     heuristic fallback, and the model version is recorded either way.
+
+    Confidence honesty: the LLM's self-reported confidence is labeled
+    'model_uncalibrated'. The deterministic fallback carries NO fake numeric
+    confidence — it is labeled 'heuristic' and money-moving actions then
+    require human approval by policy.
     """
     features = build_features(case, attempts)
     p_nat_heuristic, reasons = heuristic_natural_probability(features)
@@ -209,6 +214,7 @@ async def analyze_case(case: dict, attempts: list, allow_llm: bool = True) -> di
         explanation = llm["explanation"]
         evidence = llm["evidence"] or reasons[:4]
         confidence = round(llm["confidence"], 2)
+        confidence_type = "model_uncalibrated"
         model_version = MODEL_VERSION_LLM
     else:
         p_nat = p_nat_heuristic
@@ -225,7 +231,8 @@ async def analyze_case(case: dict, attempts: list, allow_llm: bool = True) -> di
             "attempt history, prior successes and elapsed time since the last failure."
         )
         evidence = reasons[:4]
-        confidence = 0.5
+        confidence = None
+        confidence_type = "heuristic"
         model_version = MODEL_VERSION_HEURISTIC
 
     amount = float(case.get("amount_at_risk") or 0)
@@ -274,6 +281,7 @@ async def analyze_case(case: dict, attempts: list, allow_llm: bool = True) -> di
         "recommended_action": recommended,
         "selection_reason": selection_reason,
         "confidence": confidence,
+        "confidence_type": confidence_type,
         "explanation": explanation,
         "evidence": evidence,
         "model_version": model_version,

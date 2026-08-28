@@ -245,7 +245,6 @@ def test_engine_full_loop_and_double_counting():
         order = f"ORD-TEST-{suffix}"
         await db.payment_attempts.delete_many({"order_id": order})
         await db.recovery_cases.delete_many({"order_key": order})
-        await db.recovery_actions.delete_many({"case_id": {"$regex": "^case_"}})
         await db.audit_events.delete_many({"related.order_key": order})
 
         def attempt(pid, status, amount=5000.0):
@@ -284,6 +283,7 @@ def test_engine_full_loop_and_double_counting():
 
         await db.payment_attempts.delete_many({"order_id": order})
         await db.recovery_cases.delete_many({"order_key": order})
+        await db.recovery_actions.delete_many({"case_id": case_id})
 
     LOOP.run_until_complete(run())
 

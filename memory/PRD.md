@@ -48,23 +48,31 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Testing agent iterations 1–3 complete: critical ingest-timeout bug found and fixed (202 + background import + polling); duplicate-exception semantics, batch status badges, mobile responsiveness, net-recovery clarity, and invalid-signature UI feedback all verified fixed (iteration_3: 100% pass, no open action items)
 - Sample merchant CSV at /app/test_data/sample_payments.csv; comprehensive README.md
 
+## Implemented (2026-08-28, dashboard data-integrity overhaul)
+- New `backend/metrics.py`: single source of truth — pure functions for case titles, source taxonomy (LIVE/TEST MODE/IMPORTED/SIMULATED), why-at-risk text, strict cumulative funnel (monotonic by construction, execution evidence from immutable audit trail), KPIs with known-final-outcome recovery-rate denominator, charts, policy activity from audit events
+- Fake 50% confidence eliminated: heuristic fallback now carries `confidence=null` + `confidence_type='heuristic'`; LLM cases labeled `model_uncalibrated`; legacy data backfilled via migration (32 + 174 cases); money-moving actions without model confidence now require human approval (policy)
+- Case naming: truthful human-readable titles ("Failed Payment for Order ORD-XXXX") primary everywhere; internal IDs only in detail/audit
+- Dashboard: KPI drill-downs (filtered case views + cost/recovery ledger modal), definition/formula tooltips, clickable funnel + side stats (stopped/invalid/blocked/exceptions), click-to-filter charts, humanized failure labels, 7/30/90D range, strict per-currency filtering (never summed/converted), currency-grouped amount sorting, honest empty/insufficient-data states
+- Fixed by testing rounds 4-5: invisible Policy Control Activity card (ResponsiveContainer 0x0 on non-chart JSX), misplaced/stretched status legend, legacy confidence backfill, cross-currency sort blending
+- Tests: 109/109 passing (test_core + test_metrics + test_dashboard_overhaul + backend_test)
+
 ## Prioritized Backlog
 ### P0 (remaining)
 - None
 
 ### P1
 - Batch Evaluation Lab: baseline comparison (do-nothing / fixed-rule / blanket-action) with held-out labeled data support, precision/recall when ground truth exists
-- Failure Lab as a dedicated page (behaviors currently covered by simulator scenarios)
 - Scheduled verification sweeps (platform cron) instead of manual/on-event verification
 - Real payment-provider adapter (e.g., Stripe test mode) behind the existing webhook architecture
+- Scale hardening: persist stage membership/source_category on case documents (funnel currently recomputed per stage-filtered request); extract Dashboard.jsx sub-components
 
 ### P2
+- Failure Lab as a dedicated page (behaviors currently covered by simulator scenarios)
 - PDF ingestion (structured reports only, confidence-gated)
 - Multi-tenant merchant accounts and role-based permissions beyond owner/analyst
-- Cost-per-recovery and false-positive-cost dashboards; unnecessary-intervention analytics
-- Model versioning registry + reproducible training pipeline if labeled data becomes available
+- Dedicated "executed, outcome pending" metric distinct from broad active-case count
 
 ## Next Tasks
-1. Confirm regression pass (testing agent) and close iteration-1 action items
-2. Build the Evaluation Lab (P1) as the next major feature
-3. Add scheduled verification sweep via .emergent/crons.yml (P1)
+1. Build the Evaluation Lab (P1) as the next major feature
+2. Add scheduled verification sweep via .emergent/crons.yml (P1)
+3. Scale hardening: denormalize stage/source fields onto case docs (P1)

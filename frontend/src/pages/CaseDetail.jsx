@@ -20,6 +20,18 @@ function fmtTime(iso) {
   }
 }
 
+function confidenceLabel(c) {
+  if (c.confidence_type === "heuristic" || c.model_version === "heuristic-fallback-v1") {
+    return "Heuristic assessment — no numeric confidence";
+  }
+  if (c.confidence != null) {
+    return c.confidence_type === "model_uncalibrated"
+      ? `Model estimate ${Math.round(c.confidence * 100)}% — uncalibrated`
+      : `Model estimate ${Math.round(c.confidence * 100)}%`;
+  }
+  return "Insufficient historical evidence";
+}
+
 export default function CaseDetail() {
   const { caseId } = useParams();
   const navigate = useNavigate();
@@ -84,11 +96,12 @@ export default function CaseDetail() {
           <ArrowLeft className="h-4 w-4" /> Back to dashboard
         </button>
         <div className="flex flex-wrap items-center gap-4">
-          <h1 className="font-heading font-mono text-2xl font-medium tracking-tight text-slate-900">{c.case_id}</h1>
+          <h1 className="font-heading text-2xl font-medium tracking-tight text-slate-900" data-testid="case-title">{c.title || c.case_id}</h1>
           <StatusBadge value={c.status} />
           <StatusBadge value={c.verification_status} />
-          {c.simulated && <StatusBadge value="SIMULATED" />}
+          <StatusBadge value={c.source_category || (c.simulated ? "SIMULATED" : null)} />
         </div>
+        <div className="mt-1 font-mono text-xs text-slate-400">{c.case_id} · {c.order_key}</div>
         <p className="mt-2 max-w-3xl text-sm text-slate-500">{c.reason_created}</p>
       </div>
 
@@ -187,7 +200,7 @@ export default function CaseDetail() {
               </div>
               <div className="rounded-lg bg-slate-50 p-4 border border-slate-100">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Confidence</div>
-                <div className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{c.confidence != null ? `${Math.round(c.confidence * 100)}%` : "—"}</div>
+                <div className="mt-1 text-sm font-semibold leading-snug text-slate-900" data-testid="confidence-label">{confidenceLabel(c)}</div>
               </div>
               <div className="rounded-lg bg-slate-50 p-4 border border-slate-100">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Recommended</div>
@@ -272,7 +285,12 @@ export default function CaseDetail() {
               <Row label="Amount at risk" value={<Money amount={c.amount_at_risk} currency={c.currency} className="text-base font-semibold text-amber-700" />} />
               <Row label="Order" value={<span className="font-mono text-xs">{c.order_key}</span>} />
               <Row label="Customer" value={<span className="font-mono text-xs">{c.customer_reference || "—"}</span>} />
-              <Row label="Source" value={<span className="flex items-center gap-1.5">{c.source} {c.simulated && <StatusBadge value="SIMULATED" />}</span>} />
+              <Row label="Source" value={
+                <span className="flex items-center justify-end gap-1.5">
+                  <StatusBadge value={c.source_category || (c.simulated ? "SIMULATED" : null)} />
+                  <span className="text-[10px] text-slate-400">{c.source}</span>
+                </span>
+              } />
               <Row label="Created" value={<span className="font-mono text-xs">{fmtTime(c.created_at)}</span>} />
               <Row label="Outcome" value={<StatusBadge value={c.outcome} />} />
               {c.status === "VERIFIED_RECOVERED" && (

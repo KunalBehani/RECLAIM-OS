@@ -1,0 +1,33 @@
+{
+  "summary": "Round 5 regression — verified all 5 fixes from iteration 4 plus sanity, backend + frontend. BACKEND: full suite /app/backend/tests/ = 109 passed / 0 failed (junit /app/test_reports/pytest/iteration5_full.xml). Confirmed via API (Bearer session): GET /api/cases?limit=500 → 260 cases, ZERO cases with confidence=0.5 & confidence_type=null; 57 heuristic-fallback-v1 cases now have confidence=null + confidence_type='heuristic', 203 claude-sonnet-4-6 cases have confidence_type='model_uncalibrated' (migration verified). GET /api/cases?sort=amount_desc → currencies form 3 contiguous alphabetical blocks (EUR, INR, USD) and amounts are sorted only within each block (never blended); amount_asc likewise. GET /api/dashboard/summary → recovery_rate 17/17, active_cases 185, per-currency money maps intact, funnel monotonic (260→249→249→249→187→187→155→17). FRONTEND (cookie session, desktop 1920x1080 + mobile 390x844): FIX1 PASS — [data-testid='chart-policy-blocks'] body now measures 546x186 desktop / 308x276 mobile (was 0x0) and visibly renders APPROVAL 82 / ALLOW 174 / BLOCK 10 / STOP 15 chips ([data-testid='policy-decision-counts'] visible), '13 human approvals · 9 human rejections · 82 approval requests raised', and the ACTIVE BLOCK/STOP RULES list (EMERGENCY_STOP 15, MAX_EXECUTIONS_REACHED 10, COOLDOWN_ACTIVE 10). FIX2 PASS — [data-testid='status-legend'] is now INSIDE the Cases by Status card (DOM containment verified), chips are 27px tall on desktop and mobile (was 173px), and clicking the first chip filtered the table 200 → 17 rows. FIX3 PASS — case_00e2f38987d1 (heuristic-fallback-v1) shows confidence-label 'Heuristic assessment — no numeric confidence'; case_431a06c92aca (claude) shows 'Model estimate 62% — uncalibrated'; no '50%' in either page body. FIX4 PASS — sort select options read 'Amount ↓/↑ (grouped by currency)' and the API ordering matches. FIX5 PASS — kpi-recovery-rate sub-line reads '17 of 17 cases with a known final outcome · 185 still unresolved'. SANITY PASS — dashboard renders fully, funnel chips monotonic, cost-ledger modal opens from kpi-verified-net, ZERO console errors on desktop and mobile (the recharts width(-1) warning did not even appear this run).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/dashboard/summary", "issue": "Observation only: the 'still unresolved' figure surfaced in the UI is kpis.active_cases (185), which includes EVALUATED (9) and APPROVAL_PENDING (38) cases that have not been executed yet — broader than 'executed but outcome pending'. Honest but consider a dedicated pending_outcome count if the intent was executed-and-awaiting-verification."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_dashboard_overhaul.py",
+    "/app/test_reports/pytest/iteration5.xml",
+    "/app/test_reports/pytest/iteration5_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Stale test fixed by me: tests/test_dashboard_overhaul.py::test_sorting[amount_desc] still asserted global numeric descending order and was failing against the (correct) new currency-grouped sort. It now asserts contiguous alphabetical currency blocks + within-block ordering.",
+    "Carry-over (not blocking): routes_cases.list_cases still recomputes the whole funnel (3 full scans) per stage-filtered request and filters source_category in Python after a 5000-doc fetch — will not scale.",
+    "Carry-over: Dashboard.jsx is ~530 lines mixing KPIs, 5 charts, table and modal; ChartCard's new `raw` prop is the right fix but component extraction is still advisable."
+  ],
+  "updated_files": ["/app/backend/tests/test_dashboard_overhaul.py"],
+  "success_rate": {"backend": "100% (109/109 pytest)", "frontend": "100% (all 5 fixes + sanity verified on desktop and mobile, no console errors)"},
+  "seed_data_creation": "None — used existing data and the pre-existing test session.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Bearer / cookie session_token=test_session_smoke_1787904424204 (smoke.tester@example.com, analyst) — valid.",
+  "context_for_next_testing_agent": "All 5 round-4 defects are fixed and verified. Reusable suites in /app/backend/tests/ (run `cd /app/backend && python -m pytest tests/ -q`; pytest.ini forces xdist, do not pass -n). Browser auth: add cookie session_token on reclaim-verify.preview.emergentagent.com (httpOnly/secure/sameSite None). Case detail route is /cases/{case_id} (/case/{id} redirects). [data-testid='clear-all-filters'] only exists in the empty-table state — expected, not a bug. Geometry probes used: lastElementChild rect of [data-testid='chart-policy-blocks'] and button heights inside [data-testid='status-legend'].",
+  "rca_of_the_issue": "N/A — no new defects. The single pytest failure encountered was a stale assertion in the test suite (global amount ordering) rather than a product bug; updated to the new currency-grouped contract and the full suite now passes."
+}

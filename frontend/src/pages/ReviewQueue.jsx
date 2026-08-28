@@ -68,19 +68,25 @@ export default function ReviewQueue() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => navigate(`/cases/${c.case_id}`)} className="font-mono text-sm font-semibold text-slate-900 hover:underline" data-testid={`review-open-${c.case_id}`}>
-                    {c.case_id}
+                  <button onClick={() => navigate(`/cases/${c.case_id}`)} className="text-left text-sm font-semibold text-slate-900 hover:underline" data-testid={`review-open-${c.case_id}`}>
+                    {c.title || c.case_id}
                   </button>
                   <StatusBadge value={c.status} />
                   {c.simulated && <StatusBadge value="SIMULATED" />}
                 </div>
+                <div className="mt-1 font-mono text-[11px] text-slate-400">{c.case_id} · {c.order_key}</div>
                 <div className="mt-2 text-sm text-slate-600">
                   <Money amount={c.amount_at_risk} currency={c.currency} className="text-base font-semibold text-amber-700" />
                   <span className="ml-3 text-xs text-slate-400">order {c.order_key}</span>
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
                   AI recommended: <span className="font-medium text-slate-700">{(c.recommended_action || "—").replace(/_/g, " ")}</span>
-                  {c.confidence != null && <span className="ml-2">confidence {Math.round(c.confidence * 100)}%</span>}
+                  {c.confidence != null && c.confidence_type !== "heuristic" && c.model_version !== "heuristic-fallback-v1" && (
+                    <span className="ml-2">model estimate {Math.round(c.confidence * 100)}% (uncalibrated)</span>
+                  )}
+                  {(c.confidence_type === "heuristic" || c.model_version === "heuristic-fallback-v1") && (
+                    <span className="ml-2">heuristic assessment</span>
+                  )}
                   {c.model_version && <span className="ml-2 font-mono text-[10px] text-slate-400">{c.model_version}</span>}
                 </div>
                 {c.policy_result?.reasons?.length > 0 && (

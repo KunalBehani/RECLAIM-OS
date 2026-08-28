@@ -6,6 +6,7 @@ from constants import CLOSED_CASE_STATUSES, OPEN_CASE_STATUSES, now_iso, parse_d
 from database import db, get_settings
 from execution import execute_action
 from intelligence import analyze_case
+from metrics import case_title, why_at_risk
 from policy import evaluate_policy
 
 
@@ -130,6 +131,7 @@ async def process_payment_attempt(attempt: dict, actor="system", allow_llm=True)
             "outcome": "PENDING",
             "verification_status": "UNVERIFIED",
             "confidence": None,
+            "confidence_type": None,
             "policy_result": None,
             "action_evaluations": [],
             "diagnosis": None,
@@ -141,6 +143,8 @@ async def process_payment_attempt(attempt: dict, actor="system", allow_llm=True)
             "simulated": attempt.get("simulated", False),
             "recovered_amount": 0.0,
         }
+        case_doc["title"] = case_title(case_doc)
+        case_doc["why_at_risk"] = why_at_risk(case_doc)
         await db.recovery_cases.insert_one(case_doc)
         case_doc.pop("_id", None)
         await write_audit(
@@ -303,6 +307,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
             "recommended_action": analysis["recommended_action"],
             "selection_reason": analysis["selection_reason"],
             "confidence": analysis["confidence"],
+            "confidence_type": analysis["confidence_type"],
             "explanation": analysis["explanation"],
             "evidence": analysis["evidence"],
             "model_version": analysis["model_version"],
@@ -318,6 +323,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
             "natural_recovery_probability": analysis["natural_recovery_probability"],
             "expected_natural_recovery_value": analysis["expected_natural_recovery_value"],
             "confidence": analysis["confidence"],
+            "confidence_type": analysis["confidence_type"],
         },
         model_version=analysis["model_version"],
     )
