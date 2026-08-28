@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="6" time="75.136" timestamp="2026-08-28T08:13:04.847982+00:00" hostname="agent-env-ecb5bc98-a989-473d-a347-265d0c113d47"><testcase classname="tests.backend_test.TestIngestion" name="test_upload_and_mapping" time="5.708" /><testcase classname="tests.backend_test.TestIngestion" name="test_confirm_import_report" time="60.043"><failure message="AssertionError: &lt;!DOCTYPE html&gt;&#10;  &lt;!--[if lt IE 7]&gt; &lt;html class=&quot;no-js ie6 oldie&quot; lang=&quot;en-US&quot;&gt; &lt;![endif]--&gt;&#10;  &lt;!--[if IE 7]&gt;    &lt;html class=&quot;no-js ie7 oldie&quot; lang=&quot;en-US&quot;&gt; &lt;![endif]--&gt;&#10;  &lt;!--[if IE 8]&gt;    &lt;html class=&quot;no-js ie8 oldie&quot; lang=&quot;en-US&quot;&gt; &lt;![endif]--&gt;&#10;  &lt;!--[if gt IE 8]&gt;&lt;!--&gt; &lt;html class=&quot;no-js&quot; lang=&quot;en-US&quot;&gt; &lt;!--&lt;![endif]--&gt;&#10;  &lt;head&gt;&#10;  &#10;  &lt;title&gt;preview.emergentagent.com | 502: Bad gateway&lt;/title&gt;&#10;  &lt;meta charset=&quot;UTF-8&quot; /&gt;&#10;  &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;&#10;  &lt;meta http-equiv=&quot;X-UA&#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/backend_test.py:120: in test_confirm_import_report
+    assert r.status_code == 200, r.text[:500]
+E   AssertionError: &lt;!DOCTYPE html&gt;
+E     &lt;!--[if lt IE 7]&gt; &lt;html class="no-js ie6 oldie" lang="en-US"&gt; &lt;![endif]--&gt;
+E     &lt;!--[if IE 7]&gt;    &lt;html class="no-js ie7 oldie" lang="en-US"&gt; &lt;![endif]--&gt;
+E     &lt;!--[if IE 8]&gt;    &lt;html class="no-js ie8 oldie" lang="en-US"&gt; &lt;![endif]--&gt;
+E     &lt;!--[if gt IE 8]&gt;&lt;!--&gt; &lt;html class="no-js" lang="en-US"&gt; &lt;!--&lt;![endif]--&gt;
+E     &lt;head&gt;
+E     
+E     &lt;title&gt;preview.emergentagent.com | 502: Bad gateway&lt;/title&gt;
+E     &lt;meta charset="UTF-8" /&gt;
+E     &lt;meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /&gt;
+E     &lt;meta http-equiv="X-UA
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestIngestion" name="test_reimport_blocked" time="8.565"><failure message="assert 200 == 409&#10; +  where 200 = &lt;Response [200]&gt;.status_code">tests/backend_test.py:136: in test_reimport_blocked
+    assert r.status_code == 409
+E   assert 200 == 409
+E    +  where 200 = &lt;Response [200]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestIngestion" name="test_natural_recovery_orders_have_no_case" time="0.047"><failure message="AssertionError: ORD-9001 recovered naturally but has case(s): ['case_8eb27ddb77c2']&#10;assert [{'case_id': ...D-9001', ...}] == []&#10;  &#10;  Left contains one more item: {'case_id': 'case_8eb27ddb77c2', 'order_key': 'ORD-9001', 'order_id': 'ORD-9001', 'invoice_id': 'ORD-9001', ...}&#10;  Use -v to get more diff">tests/backend_test.py:143: in test_natural_recovery_orders_have_no_case
+    assert cases == [], f"{order} recovered naturally but has case(s): {[c['case_id'] for c in cases]}"
+E   AssertionError: ORD-9001 recovered naturally but has case(s): ['case_8eb27ddb77c2']
+E   assert [{'case_id': ...D-9001', ...}] == []
+E     
+E     Left contains one more item: {'case_id': 'case_8eb27ddb77c2', 'order_key': 'ORD-9001', 'order_id': 'ORD-9001', 'invoice_id': 'ORD-9001', ...}
+E     Use -v to get more diff</failure></testcase><testcase classname="tests.backend_test.TestIngestion" name="test_no_double_counting_ord_9002" time="0.043" /><testcase classname="tests.backend_test.TestIngestion" name="test_high_value_case_awaits_approval" time="0.090" /></testsuite></testsuites>

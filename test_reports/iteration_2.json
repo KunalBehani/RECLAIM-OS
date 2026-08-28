@@ -1,0 +1,39 @@
+{
+  "summary": "Regression pass on RECLAIM OS (iteration_2). Backend: full pytest suite re-run — 56/56 pass in 58s (tests/backend_test.py + tests/test_core.py). Frontend (Playwright, session_token cookie): REGRESSION 1 PASS (fresh CSV /tmp/ui_fresh_r2.csv uploaded via hidden input; confirm returns 202, UI shows 'Importing in background — polling for results…', validation-report + import-results render after ~35s with no 502/stuck state; counts total=16, valid=12, duplicates=1, invalid amounts=1, unsupported status=1, missing linkage=1, rows_to_exception_queue=4). REGRESSION 2 PASS (duplicate row now queued with reason duplicate_payment_id, verified in /api/review/queue). REGRESSION 3 PASS (batch badges show MAPPING REVIEW / IMPORTED, no VERIFIED). REGRESSION 4 PARTIAL (hamburger + drawer open/close work, KPI text no longer truncated, but page-level horizontal overflow still exists on Dashboard/Ingest/Events). REGRESSION 5 PASS (net-recovery sub-line explains gross minus action costs and negative currency lines). REGRESSION 6 FAIL (invalid-signature card is not reordered — it is not rendered at all; button now gives zero feedback). SANITY PASS: dashboard KPIs/funnel/chart, case detail (all cards) + decision replay stepping, review queue approve -> HUMAN_APPROVED + SIMULATED execution, simulator event, scenarios 2 and 5.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/review/queue (exceptions)", "issue": "Exception documents return payment_id: null for CSV exceptions (only record_ref carries the identifier). Cosmetic/API-shape inconsistency, not blocking."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Events.jsx — invalid signature test", "issue": "REGRESSION 6 not fixed correctly. `sigResult` state is set in testInvalidSignature() but is NEVER rendered anywhere in the JSX (grep: 'sigResult' appears only at the useState declaration). Clicking 'Test invalid signature' fires POST /api/simulate/invalid-signature-test (200) and then produces NO card, toast or any visible feedback — the previous 'REJECTED — HTTP 401' evidence card was deleted instead of moved below the simulated-event card. Also testInvalidSignature() has no try/catch, so a failure would be a silent unhandled rejection.", "selector": "[data-testid=\"invalid-sig-test-btn\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Mobile 390x844 (Dashboard, Ingest, Events)", "issues": ["REGRESSION 4 only partially fixed. Hamburger (mobile-menu-btn) opens the drawer, X closes it, KPI text wraps correctly — but the whole page still scrolls horizontally: documentElement.scrollWidth = 511px on Dashboard, 652px on /ingest, 844px on /events (viewport 390). Culprits: wide <table class='w-full text-sm'> blocks and the Dashboard filter row (div.flex.items-center.gap-3 containing the status <select>) are not wrapped in an overflow-x-auto container. /review is correct (scrollWidth = 390) — apply the same wrapper pattern to the Dashboard cases table, Ingest 'Recent Batches' table, Events webhook-events table, and the Events endpoint <code> URL (405px wide)."]},
+      {"screen": "Ingest validation report", "issues": ["Banner says '4 rows sent to the exception queue' but the ROW/ERRORS table below lists only 3 rows (9 invalid_amount, 10 unsupported_status, 12 missing_linkage). The duplicate row (row 11, duplicate_payment_id) is counted but not listed, so the numbers appear inconsistent to the user."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/backend/tests/test_core.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "HIGH: Render the invalid-signature result in Events.jsx (a card using sigResult, placed AFTER the sim-event-result card, with a data-testid such as invalid-sig-result) and wrap testInvalidSignature in try/catch with a toast on failure. Currently the button silently does nothing.",
+    "Wrap the remaining wide tables/filter row in overflow-x-auto (Dashboard cases table + filter row, Ingest Recent Batches, Events webhook events table, webhook URL code block) to remove the 121–454px page-level horizontal overflow at 390px.",
+    "Ingest validation report: also list the duplicate row in the ROW/ERRORS table (or footnote it) so the '4 rows sent to the exception queue' count matches the visible rows."
+  ],
+  "critical_code_review_comments": [
+    "Events.jsx: dead state — `sigResult`/`setSigResult` are written but never read/rendered; ESLint does not flag it because the setter is used. This is exactly the class of bug that makes a button look broken.",
+    "Events.jsx testInvalidSignature() is the only async handler without try/catch — no error state for a demo-critical security control.",
+    "Layout.jsx close button had no data-testid (added mobile-menu-close-btn during this run).",
+    "Ingest polling implementation is correct: 202 + GET /api/ingest/{batch_id} poll, visible 'Importing in background' state, terminal statuses handled; no gateway timeout observed (report rendered ~35s after confirm)."
+  ],
+  "updated_files": ["/app/frontend/src/components/Layout.jsx (added data-testid=\"mobile-menu-close-btn\" to the sidebar close button)"],
+  "success_rate": {"backend": "100% (56/56 pytest)", "frontend": "4.5/6 regressions verified fixed (R1,R2,R3,R5 pass; R4 partial; R6 fail) + all sanity flows pass"},
+  "seed_data_creation": "Uploaded fresh CSVs /tmp/ui_fresh_r2.csv (suffix C70F3, imported: 8 cases, 4 exceptions) and /tmp/ui_fresh_r3.csv (suffix EEF47, left in MAPPING_REVIEW to verify the badge). Ran 1 simulated event, scenarios 2 and 5, and approved review case case_5ae37287342f (SIMULATED execution).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Bearer / cookie session_token=test_session_smoke_1787904424204 (smoke.tester@example.com, role analyst) — still valid.",
+  "context_for_next_testing_agent": "Auth: add cookie session_token=test_session_smoke_1787904424204 on reclaim-verify.preview.emergentagent.com (httpOnly, secure, sameSite None). Gotchas learned this run: (a) upload-file-input is hidden — wait with state='attached' before set_input_files; (b) fresh CSV is mandatory (replace ORD-90 -> ORD-<suffix>- and txn_10 -> txn_<suffix>_), otherwise everything is duplicate-blocked; (c) after confirm, poll up to ~60s for [data-testid='validation-report']; (d) correct testids: scenario-btn-{1..6} (NOT scenario-{n}-btn), approve-case-btn-{case_id} / reject-case-btn-{case_id} / invalid-case-btn / stop-case-btn / alternate-action-select-{case_id}, sim-event-result, scenario-result, mobile-menu-btn, mobile-menu-close-btn (newly added), case-row-{id}, case-summary/ai-analysis/action-comparison/policy-result/payment-timeline/audit-trail/decision-replay(+replay-detail, decision-replay-next-btn). Remaining open items: Events invalid-signature card not rendered; mobile horizontal overflow on Dashboard/Ingest/Events tables.",
+  "rca_of_the_issue": "Regression 6: the fix intended to move the invalid-signature rejection card below the simulated-event card, but the JSX block that consumed `sigResult` was removed and never re-added, leaving orphan state. Result: the POST still succeeds (200) yet the UI renders nothing, which reads as a dead button. Regression 4: the layout fix added the mobile top bar/hamburger and made the sidebar translate off-canvas, but wide data tables and the dashboard filter row were not given horizontal scroll containers, so document scrollWidth still exceeds the 390px viewport (511/652/844px)."
+}

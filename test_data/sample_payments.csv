@@ -1,0 +1,17 @@
+transaction_id,order_id,customer_email,total,currency,payment_status,error_code,payment_method,created_at
+txn_1001,ORD-9001,priya.sharma@example.com,12500,INR,failed,insufficient_funds,card,2026-08-20T09:15:00Z
+txn_1002,ORD-9001,priya.sharma@example.com,12500,INR,captured,,card,2026-08-20T14:22:00Z
+txn_1003,ORD-9002,rahul.verma@example.com,8999,INR,failed,do_not_honor,card,2026-08-21T11:05:00Z
+txn_1004,ORD-9003,ananya.iyer@example.com,450,USD,failed,insufficient_funds,card,2026-08-22T16:40:00Z
+txn_1005,ORD-9003,ananya.iyer@example.com,450,USD,failed,insufficient_funds,card,2026-08-23T09:12:00Z
+txn_1006,ORD-9004,vikram.mehta@example.com,75000,INR,failed,insufficient_funds,netbanking,2026-08-24T13:30:00Z
+txn_1007,ORD-9005,sara.ali@example.com,2300,INR,captured,,upi,2026-08-24T15:45:00Z
+txn_1008,ORD-9006,arjun.nair@example.com,not_a_number,INR,failed,processing_error,card,2026-08-25T10:20:00Z
+txn_1009,ORD-9007,meera.krishnan@example.com,5600,INR,weird_status,,card,2026-08-25T12:00:00Z
+txn_1003,ORD-9002,rahul.verma@example.com,8999,INR,failed,do_not_honor,card,2026-08-21T11:05:00Z
+txn_1010,,deepak.raj@example.com,3200,INR,failed,try_again_later,card,2026-08-26T08:10:00Z
+txn_1011,ORD-9008,divya.pillai@example.com,15000,INR,failed,stolen_card,card,2026-08-26T14:55:00Z
+txn_1012,ORD-9009,karan.singh@example.com,1200,EUR,failed,expired_card,card,2026-08-27T09:35:00Z
+txn_1013,ORD-9010,lakshmi.rao@example.com,9999,INR,failed,issuer_unavailable,netbanking,2026-08-27T18:20:00Z
+txn_1014,ORD-9010,lakshmi.rao@example.com,9999,INR,paid,,netbanking,2026-08-28T08:05:00Z
+txn_1015,ORD-9011,omar.farooq@example.com,6750,INR,failed,insufficient_funds,card,2026-08-28T10:45:00Z

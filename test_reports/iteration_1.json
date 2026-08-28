@@ -1,0 +1,81 @@
+{
+  "summary": "Full-stack test of RECLAIM OS. Backend: 56 pytest tests run (54 pass, 2 fail) covering auth gating, dashboard, webhook HMAC security, simulator scenarios 1/2/4/5 + invalid-signature, case detail/replay/filters, review queue approve/reject, emergency stop, and CSV ingestion end-to-end. Frontend: verified all 6 priority flows via Playwright with MongoDB test-session cookie (P1 auth+dashboard PASS, P2 ingest UI PASS for duplicate data but CRITICAL 502 on fresh data, P3 case detail + decision replay PASS, P4 review queue approve -> HUMAN_APPROVED + SIMULATED PASS, P5 simulator + scenarios 5/2 + invalid signature PASS, P6 API security PASS).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/ingest/{batch_id}/confirm",
+        "issue": "Returns 502 through the public ingress after exactly 60.2s when the batch contains genuinely new rows (12 valid rows). Reproduced twice (pytest + standalone probe /app/backend/tests/probe_confirm.py). Root cause: routes_ingest.confirm_import loops over records calling process_payment_attempt -> intelligence.analyze_case -> _llm_case_analysis sequentially with asyncio.wait_for(timeout=45) per case (BATCH_LLM_BUDGET cases), so wall time exceeds the 60s ingress limit. Localhost/duplicate-only batches return 200 in <1s, which is why this hides in happy-path smoke tests. Fix: make the import a background task (return 202 + batch_id, poll /api/ingest/batches for status), or cap total LLM wall time / run analyses concurrently with a hard aggregate budget well under 60s.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/ingest/{batch_id}/confirm (validation report)",
+        "issue": "report.rows_to_exception_queue = 3, but spec/review request expects 4 (the 1 duplicate row is counted in duplicate_rows but never queued as an exception). Either queue duplicates as exceptions or correct the spec/UI copy ('3 rows sent to the exception queue')."
+      },
+      {
+        "endpoint": "GET /api/ingest/batches",
+        "issue": "Batch history shows status 'VERIFIED' for a batch where 0 cases were created and all 12 rows were duplicates-blocked; the label is ambiguous vs the IMPORTED status used internally."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Ingest.jsx (mapping confirm)",
+        "issue": "When POST confirm returns 502 (fresh data, >60s), the UI shows NO error state at all: it silently stays on the mapping-review screen forever with 0 error elements and no toast/spinner resolution. User has no feedback, and re-clicking later yields 409 'already imported'. Missing loading/error state handling for the confirm call.",
+        "selector": "[data-testid=\"mapping-confirm-btn\"]",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "CSV ingestion of new data via UI",
+        "issue": "End-to-end import of new records cannot be completed from the browser: confirm times out at the gateway (502) even though the server-side import continues, so validation-report / import-results never render for genuinely new batches.",
+        "affected_selectors": ["[data-testid=\"mapping-confirm-btn\"]", "[data-testid=\"validation-report\"]", "[data-testid=\"import-results\"]"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "All pages on mobile (390x844)",
+        "issues": ["377px horizontal overflow: the 256px sidebar is always rendered (no collapse/hamburger), page title and KPI values are cut off mid-word (e.g. 'Recovery Dashboar', '₹15,01,'). No responsive layout below ~1024px."]
+      },
+      {
+        "screen": "Dashboard KPI cards",
+        "issues": ["'VERIFIED NET RECOVERY' displays negative per-currency values (-€24, -$48) alongside a positive ₹54,846 with no explanation beyond 'Action costs'; reads like a data bug to a user. Consider showing gross/cost/net rows per currency or clamping at 0 with a tooltip."]
+      },
+      {
+        "screen": "Events & Simulator",
+        "issues": ["The red 'REJECTED — HTTP 401' invalid-signature result renders ABOVE the successful simulated-event result card, making it look like the last action failed."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_core.py",
+    "/app/backend/tests/probe_confirm.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Make ingest confirm non-blocking (202 + background import + polling) or bound total LLM time <60s, so the public ingress does not 502 on new-data imports.",
+    "CRITICAL: Add loading + error state handling to Ingest.jsx confirmImport (surface non-2xx / network failures, disable button while in flight, and handle 409 with a clear message).",
+    "Decide and align duplicate-row exception semantics: rows_to_exception_queue should be 4 per spec, currently 3.",
+    "Add responsive layout (collapsible sidebar) — mobile currently overflows 377px with truncated KPI text.",
+    "Clarify negative 'Verified net recovery' presentation per currency.",
+    "Reorder Events page result cards so the latest action's result appears first."
+  ],
+  "critical_code_review_comments": [
+    "routes_ingest.py confirm_import performs unbounded sequential await process_payment_attempt with a 45s-per-case LLM timeout inside the request/response cycle — an unbounded-latency HTTP handler behind a 60s ingress. Move to a background task/queue.",
+    "intelligence.py: per-case asyncio.wait_for(_call(), timeout=45) means a single slow LLM call can consume the whole request budget; use a batch-level deadline and fall back to heuristic-fallback-v1 once exceeded.",
+    "Frontend Ingest.jsx: fetch/axios result for confirm is not error-handled, so failures are invisible; every API call needs loading/success/error states.",
+    "data-testid names in the implementation differ from the spec (ai-analysis vs ai-analysis-card, action-comparison vs action-comparison-table, policy-result vs policy-result-card). Not a defect, but keep spec/testids in sync for future automation."
+  ],
+  "updated_files": ["/app/backend/tests/probe_confirm.py (new diagnostic probe for the confirm timeout)"],
+  "success_rate": {"backend": "96% (54/56 pytest)", "frontend": "83% (5/6 priority flows fully pass; P2 ingest fails for new data)"},
+  "seed_data_creation": "Uploaded /app/test_data/sample_payments.csv (all duplicates) and a suffixed copy /tmp/ui_fresh.csv (ORD-4B125-*) via the UI; pytest created several suffixed batches; approved review case case_393a1f6a8a7f (SIMULATED execution); ran simulator scenarios 2 and 5 and one manual simulated failed event (ORD-UI-512040).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Bearer / cookie session_token=test_session_smoke_1787904424204 (smoke.tester@example.com, role analyst) — valid until 2026-09-04. /app/memory/test_credentials.md and /app/auth_testing.md are accurate.",
+  "context_for_next_testing_agent": "Auth via cookie session_token on domain reclaim-verify.preview.emergentagent.com (httpOnly, secure, sameSite=None) works; unauthenticated / correctly redirects to /login. Key gotcha: re-uploading /app/test_data/sample_payments.csv now yields 12 duplicates-blocked and confirm returns 200 in <1s — that path does NOT exercise the bug. To retest the ingest timeout you MUST generate a fresh CSV (replace 'ORD-90'->'ORD-<suffix>-' and 'txn_10'->'txn_<suffix>_', see _fresh_csv in backend_test.py or probe_confirm.py). Correct case-detail testids: ai-analysis, model-version, action-comparison, policy-result, payment-timeline, audit-trail, case-summary, decision-replay(+ replay-detail, decision-replay-next-btn/prev-btn), execution-history, verification-card, case-actions. Review queue buttons are suffixed with case_id. Failing pytest tests: TestIngestion::test_confirm_completes_within_gateway_timeout and ::test_validation_report_counts.",
+  "rca_of_the_issue": "Ingest confirm 502: POST /api/ingest/{batch}/confirm processes every valid record synchronously inside the HTTP request, and each newly created case triggers a Claude call guarded only by a per-call 45s timeout (BATCH_LLM_BUDGET cases). With 12 new rows the handler runs well past the 60s Kubernetes ingress limit, so the edge returns 502 while the server keeps importing. The frontend has no error branch for the confirm call, so the user sees an indefinitely stuck mapping screen; a retry then hits 409 because the batch has meanwhile reached IMPORTED. Mitigation: return 202 immediately, run the import in a background task, and poll /api/ingest/batches for status/report."
+}
