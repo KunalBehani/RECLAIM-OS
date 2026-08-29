@@ -46,6 +46,21 @@ EVENT_STAGE = {
     "CASE_CLOSED": "Closure",
     "CASE_STOPPED": "Closure",
     "SETTINGS_UPDATED": "System",
+    "WEBHOOK_RECEIVED": "Event Ingestion",
+    "WEBHOOK_SIGNATURE_REJECTED": "Validation",
+    "DUPLICATE_EVENT_DETECTED": "Validation",
+    "EVENT_NORMALIZED": "Validation",
+    "PAYMENT_UPDATED": "Event Ingestion",
+    "STALE_EVENT_IGNORED": "Validation",
+    "ORDER_LINKED": "Event Ingestion",
+    "ORDER_UPDATED": "Event Ingestion",
+    "RECONCILIATION_STARTED": "Verification",
+    "RECONCILIATION_COMPLETED": "Verification",
+    "RECONCILIATION_FAILED": "Verification",
+    "INTEGRATION_CONFIGURED": "System",
+    "INTEGRATION_TEST_SUCCEEDED": "System",
+    "INTEGRATION_TEST_FAILED": "System",
+    "INTEGRATION_DISCONNECTED": "System",
 }
 
 
@@ -72,11 +87,32 @@ def _sort_cases(cases: list, sort: str) -> list:
     return sorted(cases, key=lambda c: c.get("created_at") or "", reverse=True)
 
 
+async def _audit_for_case(case: dict) -> list:
+    """Complete audit lineage for a case: case-scoped events plus pre-case
+    ingestion lineage (WEBHOOK_RECEIVED / EVENT_NORMALIZED) joined via the
+    case's provider event ids. Used by both the detail and replay endpoints
+    so the two can never drift."""
+    audit = await db.audit_events.find({"case_id": case["case_id"]}, {"_id": 0}).sort("timestamp", 1).to_list(500)
+    provider_event_ids = [
+        e["provider_event_id"]
+        for e in await db.provider_events.find(
+            {"normalized_order_id": case["order_key"]}, {"_id": 0, "provider_event_id": 1}
+        ).to_list(200)
+    ]
+    if provider_event_ids:
+        lineage_audit = await db.audit_events.find(
+            {"related.provider_event_id": {"$in": provider_event_ids}, "case_id": None}, {"_id": 0}
+        ).sort("timestamp", 1).to_list(100)
+        existing_ids = {e["event_id"] for e in audit}
+        audit = sorted(audit + [e for e in lineage_audit if e["event_id"] not in existing_ids], key=lambda e: e["timestamp"])
+    return audit
+
+
 @router.get("/cases")
 async def list_cases(request: Request, status: str | None = None, outcome: str | None = None,
                      policy: str | None = None, q: str | None = None, stage: str | None = None,
                      source: str | None = None, attributed_action: str | None = None,
-                     sort: str = "newest", limit: int = 200):
+                     sort: str = "newest", limit: int = 500):
     await get_current_user(request)
     query = {}
     if status:
@@ -127,11 +163,20 @@ async def get_case(case_id: str, request: Request):
         {"$or": [{"order_id": case["order_key"]}, {"invoice_id": case["order_key"]}]}, {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
     actions = await db.recovery_actions.find({"case_id": case_id}, {"_id": 0}).sort("created_at", 1).to_list(100)
-    audit = await db.audit_events.find({"case_id": case_id}, {"_id": 0}).sort("timestamp", 1).to_list(500)
+    audit = await _audit_for_case(case)
     for a in attempts:
         if a.get("customer_reference"):
             a["customer_reference"] = mask_reference(a["customer_reference"])
-    return {"case": _mask_case(enrich_case(case)), "attempts": attempts, "actions": actions, "audit_trail": audit}
+    provider_events = await db.provider_events.find(
+        {"normalized_order_id": case["order_key"]}, {"_id": 0}
+    ).sort("received_at", 1).to_list(200)
+    return {
+        "case": _mask_case(enrich_case(case)),
+        "attempts": attempts,
+        "actions": actions,
+        "audit_trail": audit,
+        "provider_events": provider_events,
+    }
 
 
 @router.get("/cases/{case_id}/replay")
@@ -140,7 +185,7 @@ async def decision_replay(case_id: str, request: Request):
     case = await db.recovery_cases.find_one({"case_id": case_id}, {"_id": 0})
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    audit = await db.audit_events.find({"case_id": case_id}, {"_id": 0}).sort("timestamp", 1).to_list(500)
+    audit = await _audit_for_case(case)
     steps = []
     for event in audit:
         steps.append({
@@ -207,6 +252,16 @@ async def manual_execute(case_id: str, request: Request):
                           reason="; ".join(r["detail"] for r in policy_result["reasons"]),
                           after_state={"action_type": action_type}, policy_rule_reference=policy_result["rule_version"])
         return {"executed": False, "policy_result": policy_result, "note": "Action requires human approval; routed to review queue."}
+    # Same pre-execution settle guard as the autopilot: never fire an action
+    # for an order that has already settled.
+    settled_attempt = await db.payment_attempts.find_one(
+        {"$or": [{"order_id": case["order_key"]}, {"invoice_id": case["order_key"]}], "status": "success"}, {"_id": 1}
+    )
+    settled_order = await db.orders.find_one({"order_id": case["order_key"], "status": "paid"}, {"_id": 1})
+    if settled_attempt or settled_order:
+        await verify_case(case_id, actor=f"pre-execution-guard:{user['email']}")
+        return {"executed": False, "policy_result": policy_result,
+                "note": "Order already settled; action NOT executed. Case reconciled instead."}
     exec_count = len([a for a in actions if a.get("action_type") == action_type and a.get("executed_time")])
     res = await execute_action(
         case_id, action_type,
@@ -286,10 +341,12 @@ async def review_queue(request: Request):
     await get_current_user(request)
     pending = await db.recovery_cases.find({"status": "APPROVAL_PENDING"}, {"_id": 0}).sort("created_at", -1).to_list(100)
     exceptions = await db.exceptions.find({"status": "OPEN"}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    exceptions_total = await db.exceptions.count_documents({"status": "OPEN"})
     return {
         "approval_pending": [_mask_case(enrich_case(c)) for c in pending],
         "exceptions": exceptions,
-        "counts": {"approval_pending": len(pending), "exceptions": len(exceptions)},
+        "exceptions_truncated": exceptions_total > len(exceptions),
+        "counts": {"approval_pending": len(pending), "exceptions": exceptions_total},
     }
 
 

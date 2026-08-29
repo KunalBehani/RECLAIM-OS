@@ -56,6 +56,18 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Fixed by testing rounds 4-5: invisible Policy Control Activity card (ResponsiveContainer 0x0 on non-chart JSX), misplaced/stretched status legend, legacy confidence backfill, cross-currency sort blending
 - Tests: 109/109 passing (test_core + test_metrics + test_dashboard_overhaul + backend_test)
 
+## Implemented (2026-08-29, Phase 1 — Razorpay TEST MODE real data architecture)
+- Provider abstraction (`providers/base.py`) + `providers/razorpay_adapter.py`: raw-body HMAC-SHA256 signature verification (constant-time), event normalization (payment.authorized/captured/failed, order.paid; paise→major units), provider API client (test connection, fetch order/payment, sanitized errors)
+- Public webhook endpoint `POST /api/webhooks/razorpay`: 1MB limit, 503 when unconfigured, signature-first processing, `x-razorpay-event-id` idempotency via durable `provider_events` store (unique provider+event id), malformed/unsupported/replay handling
+- Engine refactor (`detection.py`): order-centric, arrival-order-independent evaluation; precedence-aware payment ledger upserts (never downgrade); `orders` collection for order.paid; risk_evidence stored per case; attribution tiers STRONG/MODERATE/UNCERTAIN/NONE (only customer-facing actions attributable; monitoring never earns attribution); PARTIALLY_RECOVERED outcome; natural recovery never attributed
+- Integrations UI page: TEST MODE config (owner-only, masked creds, secrets server-side only), test connection (honest ERROR with dummy keys), disconnect, webhook endpoint + copy, integration health (real counts), verification sweep, 12-scenario webhook test lab through the real endpoint, LIVE mode card marked unavailable
+- Source taxonomy: TEST_MODE added end-to-end (metrics, badges, filters); LIVE/TEST MODE/IMPORTED/SIMULATED never blended
+- Review queue exception count fixed (capped-list bug); out-of-order INVALID guard now references last failed attempt instead of case-creation time (real engine bug found by tests)
+- Tests: 129 main suite + 20 Razorpay pipeline (A–T) + 47 public-review + 6 iteration-7 regression = 176 passing, 0 failing
+- Round-7 follow-ups verified: Decision Replay now starts at WEBHOOK_RECEIVED → EVENT_NORMALIZED → CASE_CREATED (shared `_audit_for_case` helper prevents endpoint drift); manual execute has the same pre-execution settle guard as the autopilot
+- Round-6 testing-agent defects fixed (round-7 verified): attribution allow-list now applied symmetrically (monitoring/control actions can never earn recovery attribution); WEBHOOK_RECEIVED/EVENT_NORMALIZED lineage surfaced in case audit trail; pre-execution settle guard closes the LLM-latency race; internal webhook base URL moved to env (INTERNAL_WEBHOOK_BASE_URL); minor UI cleanups
+- NOT DONE (blocked by external config, per spec §30): a genuine provider-originated Razorpay test event — requires user's real rzp_test_ credentials + webhook registration. Exact steps in finish summary.
+
 ## Prioritized Backlog
 ### P0 (remaining)
 - None

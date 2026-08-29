@@ -10,6 +10,7 @@ import {
   OctagonAlert,
   Menu,
   X,
+  Plug,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../api";
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
   { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
   { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
+  { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
 ];
 
 export default function Layout() {

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="6" time="56.016" timestamp="2026-08-29T08:58:29.851149+00:00" hostname="agent-env-ecb5bc98-a989-473d-a347-265d0c113d47"><testcase classname="tests.test_iteration7_regression" name="test_non_attributable_action_before_settlement_earns_nothing[SCHEDULED_RECHECK]" time="10.932" /><testcase classname="tests.test_iteration7_regression" name="test_non_attributable_action_before_settlement_earns_nothing[ESCALATE_HUMAN]" time="10.987" /><testcase classname="tests.test_iteration7_regression" name="test_attributable_action_still_earns_moderate" time="10.564" /><testcase classname="tests.test_iteration7_regression" name="test_case_detail_includes_provider_lineage" time="9.758"><failure message="AssertionError: decision replay missing provider lineage steps: ['CASE_CREATED', 'AI_ANALYSIS_COMPLETED', 'ACTION_SELECTED', 'POLICY_DECISION', 'ACTION_EXECUTED']&#10;assert ('WEBHOOK_RECEIVED' in ['CASE_CREATED', 'AI_ANALYSIS_COMPLETED', 'ACTION_SELECTED', 'POLICY_DECISION', 'ACTION_EXECUTED'])">def test_case_detail_includes_provider_lineage():
+        suf = f"i7{uuid.uuid4().hex[:6]}"
+        oid = f"order_{suf}"
+        try:
+            _post(_pay("payment.failed", f"pay_{suf}A", oid, 180000, _now() - 300, "GATEWAY_ERROR"),
+                  f"ev_{suf}_lf")
+            case = None
+            for _ in range(40):
+                case = _case_by_order(oid)
+                if case:
+                    break
+                time.sleep(2)
+            assert case, "case not created"
+            r = requests.get(f"{BASE_URL}/api/cases/{case['case_id']}", headers=HEADERS, timeout=60)
+            assert r.status_code == 200, r.text[:300]
+            body = r.json()
+            assert '"_id"' not in json.dumps(body), "ObjectId leaked in response"
+            trail = body.get("audit_trail") or []
+            events = [e.get("event_type") for e in trail]
+            print(f"[lineage] audit_trail: {events}")
+            assert "WEBHOOK_RECEIVED" in events, f"missing WEBHOOK_RECEIVED, got {events}"
+            assert "EVENT_NORMALIZED" in events, f"missing EVENT_NORMALIZED, got {events}"
+            assert "CASE_CREATED" in events, f"missing CASE_CREATED, got {events}"
+            # lineage entries must come first chronologically
+            assert events.index("WEBHOOK_RECEIVED") &lt; events.index("CASE_CREATED"), events
+    
+            rp = requests.get(f"{BASE_URL}/api/cases/{case['case_id']}/replay",
+                              headers=HEADERS, timeout=60)
+            assert rp.status_code == 200, rp.text[:300]
+            replay_events = [s.get("event_type") for s in rp.json().get("steps", [])]
+            print(f"[lineage] replay steps: {replay_events}")
+&gt;           assert "WEBHOOK_RECEIVED" in replay_events and "EVENT_NORMALIZED" in replay_events, \
+                f"decision replay missing provider lineage steps: {replay_events}"
+E               AssertionError: decision replay missing provider lineage steps: ['CASE_CREATED', 'AI_ANALYSIS_COMPLETED', 'ACTION_SELECTED', 'POLICY_DECISION', 'ACTION_EXECUTED']
+E               assert ('WEBHOOK_RECEIVED' in ['CASE_CREATED', 'AI_ANALYSIS_COMPLETED', 'ACTION_SELECTED', 'POLICY_DECISION', 'ACTION_EXECUTED'])
+
+tests/test_iteration7_regression.py:169: AssertionError</failure></testcase><testcase classname="tests.test_iteration7_regression" name="test_cases_default_limit_is_500" time="0.243" /><testcase classname="tests.test_iteration7_regression" name="test_race_no_post_settlement_execution" time="13.390" /></testsuite></testsuites>

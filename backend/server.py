@@ -15,6 +15,7 @@ from database import client, db  # noqa: E402
 from routes_cases import router as cases_router  # noqa: E402
 from routes_dashboard import router as dashboard_router  # noqa: E402
 from routes_ingest import router as ingest_router  # noqa: E402
+from routes_integrations import router as integrations_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
 from routes_simulate import router as simulate_router  # noqa: E402
 from routes_webhooks import router as webhooks_router  # noqa: E402
@@ -28,7 +29,7 @@ async def root():
     return {"service": "RECLAIM OS API", "status": "ok", "version": "1.0.0"}
 
 
-for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router):
+for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router):
     api_router.include_router(router)
 
 app.include_router(api_router)
@@ -48,6 +49,8 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup():
     await db.webhook_events.create_index("event_id", unique=True)
+    await db.provider_events.create_index([("provider", 1), ("provider_event_id", 1)], unique=True)
+    await db.orders.create_index("order_id", unique=True)
     await db.payment_attempts.create_index("payment_id", unique=True)
     await db.payment_attempts.create_index("order_id")
     await db.payment_attempts.create_index("invoice_id")

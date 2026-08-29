@@ -1,0 +1,38 @@
+{
+  "summary": "Regression round 7 (independent confirmation of iteration_6 fixes). Ran acceptance harness tests/test_phase1_public_review.py SERIALLY (-n 0): 47/47 PASSED (previously 44/47), including the 3 previously-failing attribution/lineage tests. Also ran main suite tests/test_razorpay.py: 20/20 passed. Wrote a NEW independent harness /app/backend/tests/test_iteration7_regression.py (public-ingress APIs + Mongo verification): 5/6 passed. FIX 1 (attribution allow-list) CONFIRMED via real APIs: SCHEDULED_RECHECK and ESCALATE_HUMAN executed before a signed payment.captured now close the case NATURALLY_RECOVERED / attribution NONE / recovered 0; control case with SEND_RECOVERY_LINK still VERIFIED_RECOVERED / MODERATE / 2500. FIX 3 (race guard) CONFIRMED live: failed + captured delivered concurrently (threads) => no action executed at all, status NATURALLY_RECOVERED, attribution NONE, executed=[]; code path (detection.py:573-581 pre-execution settle guard calling verify_case) reviewed. FIX 4 CONFIRMED: GET /api/cases returns all 383 cases (limit default 500, min(total,500)), cases table rendered 383 rows with IMPORTED 240 chip; key-id-input type=text; test-connection banner shown on ERROR then cleared after Save configuration; INTERNAL_WEBHOOK_BASE_URL env var used in routes_integrations.py. FIX 2 PARTIAL: GET /api/cases/{id}.audit_trail now includes WEBHOOK_RECEIVED + EVENT_NORMALIZED before CASE_CREATED and they render on the case page, BUT GET /api/cases/{id}/replay (which powers the Decision Replay timeline on CaseDetail.jsx) still returns only CASE_CREATED onwards.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/cases/{case_id}/replay", "issue": "Provider lineage NOT included — routes_cases.py:174 queries audit_events by {case_id: case_id} only, while lineage rows have case_id=None. The same provider_event_id join applied in get_case (lines 152-158) was not applied to the replay endpoint. Result: Decision Replay on the case page starts at CASE_CREATED (verified in UI: timeline = RISK DETECTION/CASE CREATED ... CLOSURE, no WEBHOOK_RECEIVED/EVENT_NORMALIZED). FIX 2's 'replay shows those early steps' requirement is unmet."},
+      {"endpoint": "POST /api/cases/{case_id}/execute", "issue": "Manual execute has no pre-execution settle guard equivalent to run_case_pipeline (detection.py:576-581). A human-triggered money-touching action on an order that settled seconds earlier is still executed (revenue accounting stays correct — attribution UNCERTAIN, recovered 0 — but the customer-facing side effect fires). Low severity / by-design for humans, but worth an explicit warning or guard."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Case detail → Decision Replay", "issue": "Replay timeline omits WEBHOOK_RECEIVED / EVENT_NORMALIZED because /cases/{id}/replay lacks the lineage join; the separate lineage/audit section on the page does show them", "affected_selectors": ["[data-testid=\"decision-replay\"]", "[data-testid=\"replay-step-0\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_regression.py",
+    "/app/test_reports/pytest/iteration7_review.xml",
+    "/app/test_reports/pytest/iteration7_regression.xml"
+  ],
+  "action_items": [
+    "Apply the same provider_event_id lineage join used in get_case to GET /api/cases/{case_id}/replay so the Decision Replay timeline starts at WEBHOOK_RECEIVED → EVENT_NORMALIZED → CASE_CREATED (dedupe by event_id, sort by timestamp, map stage via EVENT_STAGE for the two new event types).",
+    "Optional: add the settle re-check (or a UI warning) to POST /api/cases/{case_id}/execute for money-touching actions."
+  ],
+  "critical_code_review_comments": [
+    "routes_cases.py: get_case and decision_replay now duplicate audit-fetch logic; extract a shared `_audit_for_case(case)` helper so the lineage join can never drift between the two endpoints again (this is exactly how the current gap appeared).",
+    "detection.py close_case_on_success: ATTRIBUTABLE_ACTIONS now correctly filters both executed_before and executed_after — verified end-to-end. Keep this set as the single source of truth (ACTION_CATALOG money_touching flags should ideally derive from it to avoid divergence)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration7_regression.py"],
+  "success_rate": {"backend": "97% (47/47 review suite, 20/20 razorpay, 5/6 new iteration-7 harness)", "frontend": "100% of items checked (lineage rendering, cases table 383 rows, key-id type=text, banner clear) except replay timeline lineage"},
+  "seed_data_creation": "Transient TEST_MODE cases (order_i7*) created via signed webhooks and deleted in test teardown (cases, attempts, orders, actions, audit_records). Razorpay TEST integration re-saved with the dummy keys/webhook secret whsec_test_lab_secret_123 through the UI — still configured. One extra test-lab payment.failed case was created by the UI Webhook Test Lab click (not cleaned).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "session_token=test_session_smoke_1787904424204 (owner) via cookie/Bearer",
+  "context_for_next_testing_agent": "Acceptance harness: `cd /app/backend && python -m pytest tests/test_phase1_public_review.py -q -n 0` → 47/47 (must stay green; run SERIALLY). New harness tests/test_iteration7_regression.py covers FIX 1/2/3/4; its only failing assertion is the /replay lineage one (real gap). NOTE for attribution tests: the ingestion pipeline auto-executes SAFE_PAYMENT_RETRY on new cases, so you MUST delete recovery_actions for the case before executing the action under test, and post the captured event with created_at = now+1 to avoid timestamp ties. To reproduce the LLM race you must deliver the failed and captured webhooks from concurrent threads (~1s apart) — sequential HTTP calls cannot race because the failed webhook processes the pipeline inline.",
+  "rca_of_the_issue": "FIX 2 was implemented only in GET /api/cases/{case_id} (lineage audit rows joined via related.provider_event_id with case_id=None). GET /api/cases/{case_id}/replay still filters audit_events by case_id alone, and CaseDetail.jsx renders its Decision Replay strictly from /replay.steps, so the ingestion steps remain invisible in the replay timeline."
+}

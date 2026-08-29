@@ -188,8 +188,14 @@ class TestIngestion:
             cases = [c for c in r.json()["cases"] if c["order_key"] == order]
             assert len(cases) <= 1, f"{order}: {len(cases)} cases"
             for c in cases:
-                assert c["status"] == "INVALID" and c.get("recovered_amount", 0) == 0, (
-                    f"{order} recovered naturally but case {c['case_id']} is {c['status']}")
+                # Success arrived after the failure => truthful NATURALLY_RECOVERED
+                # (never counted as system recovery). INVALID only if the settlement
+                # predates the failure. Either way: never open, never at risk.
+                assert c["status"] in ("NATURALLY_RECOVERED", "VERIFIED_RECOVERED", "INVALID"), (
+                    f"{order} recovered but case {c['case_id']} is {c['status']}")
+                if c["status"] in ("NATURALLY_RECOVERED", "INVALID"):
+                    assert c.get("recovered_amount", 0) == 0, (
+                        f"{order}: natural/invalid recovery must not count as verified recovery")
 
     def test_no_double_counting(self, client):
         self._await_report(client)

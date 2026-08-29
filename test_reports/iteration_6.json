@@ -1,0 +1,88 @@
+{
+  "summary": "Round 6 — full review of Phase 1 Razorpay TEST MODE (real data architecture) across backend + frontend. BACKEND: existing suite /app/backend/tests/ = 129 passed / 0 failed (junit iteration6_full.xml). Wrote a NEW independent suite /app/backend/tests/test_phase1_public_review.py (47 tests) that drives everything through the PUBLIC ingress URL (https://reclaim-verify.preview.emergentagent.com) and verifies persisted state directly in MongoDB: 44 passed, 3 failed (2 real defects). VERIFIED PASSING: correctly-signed payment.failed -> 200 processed, provider_event stored (processing_status PROCESSED, signature_verified true, source TEST_MODE, normalized_order_id set), case created with source RAZORPAY_TEST, title 'Failed Payment for Order …', amount converted from paise (675000 -> 6750.0 INR), risk_evidence populated; same event id replayed -> status 'duplicate', duplicate_deliveries=1, still exactly ONE case; forged signature -> 401 + security_events row + no provider_event/case; missing signature header -> 401; malformed JSON with a VALID signature -> 400 and no event stored; payment.dispute.created -> 200 ignored_unsupported (IGNORED_UNSUPPORTED, no case); >1MB body -> 413; out-of-order payment.captured BEFORE payment.authorized -> final attempt status 'success', zero cases (precedence never downgrades); order.paid closing a failed case with no action -> NATURALLY_RECOVERED, attribution_strength NONE, recovered_amount 0; late capture with no action -> NATURALLY_RECOVERED/NONE/0; executed SEND_RECOVERY_LINK then full capture -> VERIFIED_RECOVERED + MODERATE + recovered_amount 1999.0; executed action then 5000 capture on 8000 at risk -> VERIFIED_RECOVERED + outcome PARTIALLY_RECOVERED + 5000.0 + MODERATE; disconnect -> webhook returns 503 and reconfigure via PUT restores full function. SECRETS: no secret string (key_secret / webhook_secret) appears in ANY response (GET /api/integrations, PUT response, /api/webhooks/config, /api/integrations/razorpay/events) or in the rendered DOM; only key_id_masked 'rzp_test_********'. RBAC: analyst session -> 403 on PUT / DELETE / test-lab; unauthenticated -> 401. Validation: rzp_live_ key -> 400, mode LIVE -> 400, missing fields -> 400. Health counts cross-checked against provider_events + security_events in MongoDB and match. test-connection returns honest ERROR 'Provider rejected the configured credentials (401)' with the dummy keys (EXPECTED, not counted as a failure). All 12 test-lab scenarios return 200 with correct per-step HTTP codes (invalid-signature step 401, malformed-payload step 400) and unknown scenario -> 404. Verification sweep: 247 checked, 0 verified_recovered, 247 pending, provider_reconciled 0 — never claims recovery. FRONTEND (desktop 1920x1080 + mobile 390x844, cookie session): /integrations renders razorpay-card with TEST MODE badge, status badge, masked-key-id 'rzp_test_********', 'Secret configured', full webhook URL + working copy-endpoint-btn; config form rejects rzp_live_ with the exact backend message toast and keeps the form open; saving the valid rzp_test_ config toasts success and keeps the key masked; integration-health tiles render real counts (events 62 / processed 60 / duplicates 4 / signature failures 13 / provider cases 25 / recovered outcomes 2); sweep-btn -> sweep-result chips; 6 requested test-lab buttons (duplicate-event, invalid-signature, out-of-order, late-success, partial-payment, replayed-old-event) all render correct HTTP/result steps in test-lab-result; disconnect-btn -> NOT CONFIGURED, key '—', test-connection + all lab buttons disabled with the amber hint, and reconfiguring through the UI form restores everything (verified by re-running a lab scenario). Dashboard: source-summary chips = SIMULATED 102 / IMPORTED 240 / TEST MODE 25; case-source-filter TEST_MODE -> 25 rows, SIMULATED -> 102, IMPORTED -> 200 (default limit); TEST_MODE case detail shows TEST MODE badge, decision replay, payment timeline and a populated Provider Events section (payment.failed + payment.captured, PROCESSED, TEST MODE, event ids, timestamps). Regression sanity: CSV ingest end-to-end (3 rows -> 2 cases created, 1 closed natural, 0 exceptions), simulator scenario-btn-2 full loop, review queue (58 awaiting approval with policy reasons), decision replay — all working. ZERO console errors on every page except one expected 400 (the intentional rzp_live_ rejection).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "detection.py::close_case_on_success (line ~391) — affects webhook/order.paid/sweep verification",
+        "issue": "ATTRIBUTION INTEGRITY BUG: the 'executed_before' branch is NOT filtered by ATTRIBUTABLE_ACTIONS, unlike the 'executed_after' branch (line 414). Any non-customer-facing action executed before a settlement earns attribution and counts full system-recovered revenue. Reproduced twice through the REAL APIs: (1) POST /api/cases/{id}/execute {action_type:'SCHEDULED_RECHECK'} (monitoring, money_touching=false) then a captured event -> case VERIFIED_RECOVERED, attributed_action SCHEDULED_RECHECK, attribution_strength MODERATE, recovered_amount 2500.0 (expected NATURALLY_RECOVERED / NONE / 0). (2) same with ESCALATE_HUMAN (CONTROL_ACTIONS) -> VERIFIED_RECOVERED, recovered_amount 2500.0. This directly contradicts the stated spec 'only customer-facing actions attributable; monitoring actions never earn attribution' and inflates verified recovered revenue in dashboard KPIs.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "GET /api/cases/{case_id}",
+        "issue": "DATA LINEAGE GAP: audit_trail is queried by case_id only, so the WEBHOOK_RECEIVED and EVENT_NORMALIZED audit records (written in routes_webhooks.process_provider_event with related.provider_event_id but no case_id, since the case does not exist yet) never surface on the case page. Case detail shows CASE_CREATED onwards only. The records DO exist in audit_events (verified). Suggest also selecting audit rows whose related.provider_event_id is in the case's provider_events, or back-fill case_id on those two audit rows after case creation."
+      },
+      {
+        "endpoint": "routes_integrations.py:22",
+        "issue": "INTERNAL_WEBHOOK_URL = 'http://localhost:8001/api/webhooks/razorpay' is hardcoded (host+port). Violates the no-hardcoded-URL/port rule and will break if the internal port changes; read it from an env var."
+      },
+      {
+        "endpoint": "detection.py autopilot (evaluate_and_act, lines 549-580)",
+        "issue": "RACE / REAL-MONEY SAFETY (observed, not yet harmful because execution is SIMULATED): the pre-execution re-check only re-reads the CASE (status) and never re-checks whether the order now has a successful settlement. LLM analysis takes ~8s, during which a payment.captured for the same order can be ingested. Observed on lab case case_14d7700c43c0: SEND_RECOVERY_LINK was executed at 08:36:17.413 for an order whose capture was recorded at 08:36:17.419 (closure at .425 correctly downgraded it to UNCERTAIN/natural). Add an 'order already settled?' guard (payment_attempts/orders lookup) immediately before executing money-touching actions."
+      },
+      {
+        "endpoint": "GET /api/cases",
+        "issue": "source filtering happens in Python after fetching up to 5000 docs, and there is no pagination — the dashboard IMPORTED chip reads 240 while the table can only ever show 200 rows (default limit). Carry-over scale/UX concern from iteration 5."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Integrations.jsx config form",
+        "issue": "Minor: key-id-input is type=\"password\" although the Razorpay Key ID is not a secret — the user cannot visually verify the value they pasted (secret/webhook-secret masking is correct).",
+        "selector": "[data-testid=\"key-id-input\"]",
+        "priority": "LOW"
+      },
+      {
+        "component": "Integrations.jsx",
+        "issue": "Minor: the test-connection result banner (connResult) is not cleared when a new configuration is saved or when the integration is disconnected, so a stale 'ERROR — Provider rejected the configured credentials (401)' banner can remain visible next to a freshly saved config.",
+        "selector": "[data-testid=\"test-connection-result\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "TEST_MODE case detail data lineage",
+        "issue": "Provider Events section renders correctly, but the audit/decision-replay timeline on the case page starts at CASE_CREATED — the WEBHOOK_RECEIVED and EVENT_NORMALIZED lineage steps required by the spec are never shown (backend audit_trail is case_id-scoped; see backend minor issue).",
+        "affected_selectors": ["[data-testid=\"provider-events\"]"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Integrations (desktop + mobile 390px)",
+        "issues": ["No layout defects found — no horizontal overflow on mobile, contrast and spacing fine, badges and health grid reflow correctly."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase1_public_review.py",
+    "/app/test_reports/pytest/iteration6_review.xml",
+    "/app/test_reports/pytest/iteration6_full.xml"
+  ],
+  "action_items": [
+    "HIGH: filter 'executed_before' by ATTRIBUTABLE_ACTIONS in detection.py::close_case_on_success so SCHEDULED_RECHECK / ESCALATE_HUMAN / STOP_RECOVERY (and any future monitoring action) can never produce VERIFIED_RECOVERED, MODERATE/STRONG attribution or recovered_amount > 0. Add a regression test for both action types.",
+    "MEDIUM: surface WEBHOOK_RECEIVED / EVENT_NORMALIZED lineage on the case detail audit trail (join on related.provider_event_id or back-fill case_id).",
+    "MEDIUM: add an 'order already settled' re-check immediately before executing money-touching actions in the autopilot to close the LLM-latency race.",
+    "LOW: move INTERNAL_WEBHOOK_URL to an env var; clear connResult on save/disconnect; make key-id-input type=text."
+  ],
+  "critical_code_review_comments": [
+    "detection.py:391 vs :414 — asymmetric use of ATTRIBUTABLE_ACTIONS is the root cause of the attribution defect; the allow-list must be applied on both sides of the settlement timestamp.",
+    "routes_integrations.py:22 hardcodes host+port for the internal webhook self-call; use an environment variable.",
+    "Webhook endpoint security order (size limit -> configured secret -> raw-body constant-time HMAC -> JSON parse -> event-id idempotency) is correct and never re-serializes the body before verifying — good. Signature failures are recorded as security_events and audited without leaking the secret.",
+    "public_config()/mask_key_id() correctly return metadata only; verified no secret leaks in any API response or the DOM.",
+    "detection.py is 611 lines and now carries ingestion precedence, order re-evaluation, attribution and verification — approaching the split threshold."
+  ],
+  "updated_files": ["/app/backend/tests/test_phase1_public_review.py"],
+  "success_rate": {
+    "backend": "97% (129/129 existing + 44/47 new independent tests; 3 failures = 2 confirmed defects)",
+    "frontend": "100% of exercised flows (integrations config/health/sweep/test-lab/disconnect-reconnect, dashboard source separation, TEST_MODE case detail, CSV ingest, simulator, review queue) with 2 cosmetic issues and 1 lineage gap"
+  },
+  "seed_data_creation": "All test-created data was cleaned up: r6* payment attempts/cases/orders/provider_events/actions/audit rows, the CSV-ingested order_r6csv* rows, and the temporary r6-analyst user + session. Razorpay integration was left reconfigured with the dummy TEST config (key_id rzp_test_DUMMY1a2b3c, webhook_secret whsec_test_lab_secret_123, mode TEST, status NOT_CONNECTED) so the webhook path keeps working. Test-lab (order_LAB*) TEST_MODE cases persist by design.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "cookie/Bearer session_token=test_session_smoke_1787904424204 (smoke.tester@example.com, role owner) — valid and sufficient for owner-only integration endpoints.",
+  "context_for_next_testing_agent": "New reusable suite: /app/backend/tests/test_phase1_public_review.py — run it SERIALLY (`cd /app/backend && python -m pytest tests/test_phase1_public_review.py -q -n 0`) because TestLifecycle deletes/recreates the integration config and would race with xdist workers; the rest of /app/backend/tests/ runs fine with the pytest.ini defaults. It hits the PUBLIC ingress URL and asserts against MongoDB via pymongo (test_database). Known-expected states: integration status NOT_CONNECTED/ERROR and test-connection ERROR with the dummy keys is CORRECT. Currently 3 expected failures until the main agent fixes the defects: TestAttribution::test_monitoring_action_never_earns_attribution, TestAttribution::test_escalate_human_never_earns_attribution (attribution allow-list bug) and TestDashboardSources::test_test_mode_case_detail_has_provider_lineage (WEBHOOK_RECEIVED/EVENT_NORMALIZED not on case audit_trail). Browser auth: add cookie session_token on reclaim-verify.preview.emergentagent.com (httpOnly/secure/sameSite None). Note: the audit collection is `audit_events` (not audit_log); review queue route is /api/review/queue; case detail is /cases/{case_id}.",
+  "rca_of_the_issue": "Attribution defect: close_case_on_success splits executed actions into those executed before and after the settlement timestamp. The 'after' list is filtered by ATTRIBUTABLE_ACTIONS (customer-facing only) to decide UNCERTAIN, but the 'before' list is not filtered at all, so ANY executed action — including monitoring (SCHEDULED_RECHECK) and control (ESCALATE_HUMAN, STOP_RECOVERY) actions — becomes the attributed_action with MODERATE strength and the settlement amount is booked as system-recovered revenue. Reproduced end-to-end via POST /api/cases/{id}/execute followed by a genuinely signed payment.captured webhook. Fix: apply the ATTRIBUTABLE_ACTIONS allow-list when building executed_before (and treat non-attributable-only cases as natural recovery). Lineage gap: WEBHOOK_RECEIVED/EVENT_NORMALIZED audits are written before the case exists so they carry no case_id, while GET /api/cases/{id} filters audit_events by case_id only."
+}

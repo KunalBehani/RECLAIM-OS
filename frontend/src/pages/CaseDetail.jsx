@@ -350,6 +350,25 @@ export default function CaseDetail() {
             </div>
           </section>
 
+          <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="provider-events">
+            <h3 className="font-heading text-base font-medium text-slate-900">Provider Events</h3>
+            <div className="mt-3 space-y-2">
+              {(data.provider_events || []).map((e) => (
+                <div key={e.internal_event_id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
+                  <span className="font-mono text-slate-700">{e.event_type}</span>
+                  <StatusBadge value={e.processing_status} />
+                  <StatusBadge value={e.source} />
+                  <span className="font-mono text-[10px] text-slate-400">{e.provider_event_id}</span>
+                  <span className="text-[10px] text-slate-400">{fmtTime(e.received_at)}</span>
+                  {e.duplicate_deliveries > 0 && <span className="text-[10px] text-amber-600">{e.duplicate_deliveries} duplicate deliveries ignored</span>}
+                </div>
+              ))}
+              {(!data.provider_events || data.provider_events.length === 0) && (
+                <p className="text-xs text-slate-400">No provider webhook events linked to this order.</p>
+              )}
+            </div>
+          </section>
+
           <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="execution-history">
             <h3 className="font-heading text-base font-medium text-slate-900">Execution History</h3>
             <div className="mt-3 space-y-3">

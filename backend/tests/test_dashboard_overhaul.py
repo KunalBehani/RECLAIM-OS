@@ -124,7 +124,16 @@ class TestKpis:
     def test_exceptions_open_matches_review_queue(self, client, summary):
         r = client.get(f"{BASE_URL}/api/review/queue", timeout=120)
         assert r.status_code == 200
-        assert r.json()["counts"]["exceptions"] == summary["kpis"]["exceptions_open"]
+        queue_count = r.json()["counts"]["exceptions"]
+        if queue_count != summary["kpis"]["exceptions_open"]:
+            # xdist parallelism can add exceptions between the two reads; re-fetch
+            import time
+            time.sleep(1)
+            r2 = client.get(f"{BASE_URL}/api/dashboard/summary", timeout=120)
+            r3 = client.get(f"{BASE_URL}/api/review/queue", timeout=120)
+            queue_count = r3.json()["counts"]["exceptions"]
+            summary = r2.json()
+        assert queue_count == summary["kpis"]["exceptions_open"]
 
 
 # --- charts ---

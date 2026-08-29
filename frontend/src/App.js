@@ -10,6 +10,7 @@ import CaseDetail from "@/pages/CaseDetail";
 import Ingest from "@/pages/Ingest";
 import ReviewQueue from "@/pages/ReviewQueue";
 import Events from "@/pages/Events";
+import Integrations from "@/pages/Integrations";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -42,6 +43,7 @@ function AppRouter() {
         <Route path="ingest" element={<Ingest />} />
         <Route path="review" element={<ReviewQueue />} />
         <Route path="events" element={<Events />} />
+        <Route path="integrations" element={<Integrations />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
