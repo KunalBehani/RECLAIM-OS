@@ -33,9 +33,14 @@ def _run(coro):
     return LOOP.run_until_complete(coro)
 
 
+_SAVED_INTEGRATION = []
+
+
 def setup_module():
     async def _setup():
         db = _db()
+        existing = await db.integrations.find_one({"provider": "razorpay"})
+        _SAVED_INTEGRATION.append(existing)
         await db.integrations.update_one(
             {"provider": "razorpay"},
             {"$set": {
@@ -47,6 +52,20 @@ def setup_module():
             upsert=True,
         )
     _run(_setup())
+
+
+def teardown_module():
+    """Restore whatever integration config existed before the test run —
+    tests must never destroy real stored credentials."""
+    async def _teardown():
+        db = _db()
+        saved = _SAVED_INTEGRATION[0] if _SAVED_INTEGRATION else None
+        if saved is None:
+            await db.integrations.delete_one({"provider": "razorpay"})
+        else:
+            saved.pop("_id", None)
+            await db.integrations.replace_one({"provider": "razorpay"}, saved, upsert=True)
+    _run(_teardown())
 
 
 def _pay_payload(event, pid, oid, amount_paise, ts, code=None, method="card"):
@@ -429,3 +448,57 @@ def test_t_concurrent_same_event():
     assert outcomes == ["case_created", "duplicate_attempt"]
     assert _run(_db().recovery_cases.count_documents({"order_key": oid})) == 1
     _cleanup(suf)
+
+
+# U. Credentials with leading/trailing whitespace are trimmed before Basic Auth
+def test_u_whitespace_trimmed_basic_auth():
+    from providers.razorpay_adapter import RazorpayAdapter
+
+    adapter = RazorpayAdapter({"key_id": "  rzp_test_ABC123  ", "key_secret": "  secret_xyz\t", "mode": "TEST"})
+    with mock.patch("providers.razorpay_adapter.requests.request") as m:
+        m.return_value = mock.Mock(status_code=200, json=lambda: {"count": 0})
+        result = adapter.test_connection()
+    assert result["ok"] is True
+    assert m.call_args.kwargs["auth"] == ("rzp_test_ABC123", "secret_xyz")
+    assert m.call_args.args[1] == "https://api.razorpay.com/v1/orders?count=1"
+
+
+# V. Credentials with accidental newline characters are trimmed before Basic Auth
+def test_v_newline_trimmed_basic_auth():
+    from providers.razorpay_adapter import RazorpayAdapter
+
+    adapter = RazorpayAdapter({"key_id": "rzp_test_ABC123\n", "key_secret": "\nsecret_xyz\r\n", "mode": "TEST"})
+    with mock.patch("providers.razorpay_adapter.requests.request") as m:
+        m.return_value = mock.Mock(status_code=200, json=lambda: {"count": 0})
+        adapter.test_connection()
+    assert m.call_args.kwargs["auth"] == ("rzp_test_ABC123", "secret_xyz")
+
+
+# W. 401 produces masked diagnostics only — never the secret or auth header
+def test_w_401_masked_diagnostics():
+    from providers.base import IntegrationError
+    from providers.razorpay_adapter import RazorpayAdapter
+
+    secret = "super_secret_value_123"
+    adapter = RazorpayAdapter({"key_id": "rzp_test_ABC123", "key_secret": secret, "mode": "TEST"})
+    with mock.patch("providers.razorpay_adapter.requests.request") as m:
+        m.return_value = mock.Mock(status_code=401)
+        with pytest.raises(IntegrationError) as exc:
+            adapter.fetch_order("order_x")
+    msg = str(exc.value)
+    assert "401" in msg
+    assert "mode=TEST" in msg
+    assert "auth_method=basic" in msg
+    assert "endpoint=https://api.razorpay.com/v1" in msg
+    assert "key_id_prefix=rzp_test_" in msg
+    assert secret not in msg
+    assert "super_secret" not in msg
+
+
+# X. Mode selection — TEST credentials produce TEST source; nothing silently flips to LIVE
+def test_x_test_mode_source():
+    from providers.razorpay_adapter import RazorpayAdapter
+
+    assert RazorpayAdapter({"mode": "TEST"}).source == "RAZORPAY_TEST"
+    assert RazorpayAdapter({}).source == "RAZORPAY_TEST"
+    assert RazorpayAdapter({"mode": "LIVE"}).source == "RAZORPAY_LIVE"

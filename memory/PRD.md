@@ -68,9 +68,17 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Round-6 testing-agent defects fixed (round-7 verified): attribution allow-list now applied symmetrically (monitoring/control actions can never earn recovery attribution); WEBHOOK_RECEIVED/EVENT_NORMALIZED lineage surfaced in case audit trail; pre-execution settle guard closes the LLM-latency race; internal webhook base URL moved to env (INTERNAL_WEBHOOK_BASE_URL); minor UI cleanups
 - NOT DONE (blocked by external config, per spec §30): a genuine provider-originated Razorpay test event — requires user's real rzp_test_ credentials + webhook registration. Exact steps in finish summary.
 
+## Implemented (2026-08-29, Razorpay 401 root-cause diagnostic + credential-safety hardening)
+- **Root cause proven external**: controlled server-side reproduction (`backend/scripts/razorpay_repro.py`) called Razorpay directly with the stored credentials, bypassing all app code → HTTP 401 `BAD_REQUEST_ERROR "Authentication failed"`. Verdict A: Razorpay itself rejected the stored key pair; RECLAIM's request construction was correct all along (no whitespace mangling — raw vs stripped lengths identical; correct endpoint, correct Basic Auth).
+- `razorpay_adapter.py`: request-time `.strip()` on key_id/key_secret (defense vs copy-paste whitespace/newlines in DB); 401 now raises masked diagnostics only (mode, credential_source, key prefix, lengths, endpoint, method, auth_method — never the secret or Authorization header).
+- New owner-only endpoint `GET /api/integrations/razorpay/diagnostics`: safe masked credential state (key_id_prefix, lengths, secret-present booleans, source, endpoint, auth method) — verified via curl, no secrets leaked.
+- **Test-fixture flaw found & fixed**: `test_razorpay.py` `setup_module` overwrote the real stored integration doc with dummy creds on every suite run; now snapshots and restores the pre-existing doc in `teardown_module` (verified with sentinel round-trip: RESTORE_OK).
+- Tests: 4 new adapter tests (whitespace trim, newline trim, 401 masked diagnostics, TEST/LIVE source selection). Full backend suite: **186 passed**; test_razorpay.py re-run after fixture fix: 24 passed.
+- **Blocked**: real connection test cannot reach CONNECTED until the user enters a valid, current `rzp_test_` key pair (previous pair is invalid/revoked at Razorpay; DB cleared to NOT_CONFIGURED).
+
 ## Prioritized Backlog
 ### P0 (remaining)
-- None
+- None (Razorpay 401 diagnosed to external cause; awaiting valid user credentials to complete CONNECTED verification)
 
 ### P1
 - Batch Evaluation Lab: baseline comparison (do-nothing / fixed-rule / blanket-action) with held-out labeled data support, precision/recall when ground truth exists

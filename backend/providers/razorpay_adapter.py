@@ -111,8 +111,10 @@ class RazorpayAdapter(ProviderAdapter):
         }
 
     def _request(self, method: str, path: str) -> dict:
-        key_id = self.config.get("key_id")
-        key_secret = self.config.get("key_secret")
+        # Trim defensively at request time: stored values must reach Razorpay
+        # without stray whitespace/newlines from copy-paste.
+        key_id = (self.config.get("key_id") or "").strip()
+        key_secret = (self.config.get("key_secret") or "").strip()
         if not key_id or not key_secret:
             raise IntegrationError("Razorpay API credentials are not configured")
         try:
@@ -127,7 +129,14 @@ class RazorpayAdapter(ProviderAdapter):
         except requests.RequestException:
             raise IntegrationError("Provider API connection error")
         if resp.status_code == 401:
-            raise IntegrationError("Provider rejected the configured credentials (401)")
+            # Masked diagnostics only — NEVER the secret or the Authorization header.
+            raise IntegrationError(
+                "Provider rejected the configured credentials (401) "
+                f"[mode={self.mode} credential_source=integration_store "
+                f"key_id_prefix={key_id[:9]} key_id_length={len(key_id)} "
+                f"secret_present={bool(key_secret)} secret_length={len(key_secret)} "
+                f"endpoint={API_BASE} method={method} auth_method=basic]"
+            )
         if resp.status_code == 404:
             raise IntegrationError("Resource not found at provider (404)")
         if resp.status_code >= 500:

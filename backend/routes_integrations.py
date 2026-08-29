@@ -99,6 +99,34 @@ async def test_connection(request: Request):
         return {"status": "ERROR", "detail": str(exc)}
 
 
+@router.get("/razorpay/diagnostics")
+async def razorpay_diagnostics(request: Request):
+    """Owner-only safe diagnostic view of the stored Razorpay credential state.
+    Returns masked metadata ONLY — never the raw key_secret, webhook_secret,
+    or the Authorization header."""
+    await require_owner(request)
+    config = await get_integration("razorpay")
+    if not config:
+        raise HTTPException(status_code=400, detail="Razorpay integration is not configured.")
+    key_id = (config.get("key_id") or "").strip()
+    key_secret = (config.get("key_secret") or "").strip()
+    return {
+        "provider": "razorpay",
+        "mode": config.get("mode", "TEST"),
+        "status": config.get("status"),
+        "key_id_prefix": key_id[:9] if key_id else None,
+        "key_id_length": len(key_id),
+        "key_id_is_test": key_id.startswith("rzp_test_"),
+        "key_secret_present": bool(key_secret),
+        "key_secret_length": len(key_secret),
+        "credential_source": "integration_store",
+        "endpoint": "https://api.razorpay.com/v1",
+        "auth_method": "basic",
+        "webhook_secret_present": bool(config.get("webhook_secret")),
+        "last_error": config.get("last_error"),
+    }
+
+
 @router.delete("/razorpay")
 async def disconnect_razorpay(request: Request):
     user = await require_owner(request)
