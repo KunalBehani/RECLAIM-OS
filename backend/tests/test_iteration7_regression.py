@@ -26,6 +26,8 @@ HEADERS = {"Authorization": "Bearer test_session_smoke_1787904424204"}
 
 mdb = MongoClient(MONGO_URL)[DB_NAME]
 
+pytestmark = pytest.mark.usefixtures("razorpay_integration_guard")
+
 
 def _now():
     return int(datetime.now(timezone.utc).timestamp())

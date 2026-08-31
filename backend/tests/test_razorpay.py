@@ -22,50 +22,35 @@ LOCAL = "http://localhost:8001"
 TEST_SECRET = "whsec_test_lab_secret_123"
 
 LOOP = asyncio.new_event_loop()
+# Motor futures bind to the thread's current default loop at call time;
+# pin LOOP as default so dedicated-client futures always belong to LOOP.
+asyncio.set_event_loop(LOOP)
+
+
+_OWN_CLIENT = None
 
 
 def _db():
-    from database import db
-    return db
+    """Dedicated Motor client for this module: the shared `database.db` client
+    binds to whichever event loop touches it first in the worker process, which
+    conflicts with this module's LOOP under xdist scheduling."""
+    global _OWN_CLIENT
+    if _OWN_CLIENT is None:
+        from dotenv import dotenv_values
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        _be = dotenv_values("/app/backend/.env")
+        _OWN_CLIENT = AsyncIOMotorClient(os.environ.get("MONGO_URL") or _be.get("MONGO_URL"))
+        _OWN_DB = os.environ.get("DB_NAME") or _be.get("DB_NAME")
+        _OWN_CLIENT = _OWN_CLIENT[_OWN_DB]
+    return _OWN_CLIENT
 
 
 def _run(coro):
     return LOOP.run_until_complete(coro)
 
 
-_SAVED_INTEGRATION = []
-
-
-def setup_module():
-    async def _setup():
-        db = _db()
-        existing = await db.integrations.find_one({"provider": "razorpay"})
-        _SAVED_INTEGRATION.append(existing)
-        await db.integrations.update_one(
-            {"provider": "razorpay"},
-            {"$set": {
-                "provider": "razorpay", "mode": "TEST",
-                "key_id": "rzp_test_DUMMY1a2b3c", "key_secret": "dummy_secret_not_real",
-                "webhook_secret": TEST_SECRET, "status": "NOT_CONNECTED",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }, "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat()}},
-            upsert=True,
-        )
-    _run(_setup())
-
-
-def teardown_module():
-    """Restore whatever integration config existed before the test run —
-    tests must never destroy real stored credentials."""
-    async def _teardown():
-        db = _db()
-        saved = _SAVED_INTEGRATION[0] if _SAVED_INTEGRATION else None
-        if saved is None:
-            await db.integrations.delete_one({"provider": "razorpay"})
-        else:
-            saved.pop("_id", None)
-            await db.integrations.replace_one({"provider": "razorpay"}, saved, upsert=True)
-    _run(_teardown())
+pytestmark = pytest.mark.usefixtures("razorpay_integration_guard")
 
 
 def _pay_payload(event, pid, oid, amount_paise, ts, code=None, method="card"):

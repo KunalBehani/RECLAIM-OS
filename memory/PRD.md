@@ -76,6 +76,12 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Tests: 4 new adapter tests (whitespace trim, newline trim, 401 masked diagnostics, TEST/LIVE source selection). Full backend suite: **186 passed**; test_razorpay.py re-run after fixture fix: 24 passed.
 - **Blocked**: real connection test cannot reach CONNECTED until the user enters a valid, current `rzp_test_` key pair (previous pair is invalid/revoked at Razorpay; DB cleared to NOT_CONFIGURED).
 
+## Implemented (2026-08-31, Razorpay CONNECTED + test-suite hardening)
+- **Razorpay TEST MODE CONNECTED**: user generated a fresh verified key pair (validated via curl on their own machine: `count:0`), saved it in RECLAIM → real Test Connection returned a genuine authenticated 200 (`orders_visible: 0`, matches local curl). The earlier pairs were invalid at Razorpay (notably: bad secrets were exactly 20 chars; the working secret is 24).
+- **Test-infra fixes** (root-caused during regression): `tests/conftest.py` adds a module-scoped `razorpay_integration_guard` fixture — FileLock-serializes the 3 webhook test modules (they share one integrations doc + test webhook secret under xdist `-n 2 --dist loadscope`) and snapshot/restores the real stored config so suites never clobber real credentials. `test_razorpay.py`: dedicated Motor client + `asyncio.set_event_loop(LOOP)` (motor futures bind to the thread default loop at call time — module-level `new_event_loop()` alone caused "future belongs to a different loop" failures).
+- Full backend suite: **186 passed, 0 failed** (371s). Secret-leak scan of backend logs clean.
+- **Regression note**: an interrupted duplicate suite run left dummy test creds in the DB, which the guard then faithfully restored — the real pair was lost from the DB and must be re-entered once by the user (secrets are never readable back by design).
+
 ## Prioritized Backlog
 ### P0 (remaining)
 - None (Razorpay 401 diagnosed to external cause; awaiting valid user credentials to complete CONNECTED verification)

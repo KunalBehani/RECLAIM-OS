@@ -33,6 +33,8 @@ DUMMY_CFG = {
 
 mdb = MongoClient(MONGO_URL)[DB_NAME]
 
+pytestmark = pytest.mark.usefixtures("razorpay_integration_guard")
+
 
 def _ids(tag):
     suf = f"r6{tag}{uuid.uuid4().hex[:6]}"
