@@ -110,7 +110,7 @@ class RazorpayAdapter(ProviderAdapter):
             "source_mode": self.mode,
         }
 
-    def _request(self, method: str, path: str) -> dict:
+    def _request(self, method: str, path: str, json_body: dict | None = None) -> dict:
         # Trim defensively at request time: stored values must reach Razorpay
         # without stray whitespace/newlines from copy-paste.
         key_id = (self.config.get("key_id") or "").strip()
@@ -122,6 +122,7 @@ class RazorpayAdapter(ProviderAdapter):
                 method,
                 f"{API_BASE}{path}",
                 auth=(key_id, key_secret),
+                json=json_body,
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.Timeout:
@@ -148,6 +149,9 @@ class RazorpayAdapter(ProviderAdapter):
     def test_connection(self) -> dict:
         data = self._request("GET", "/orders?count=1")
         return {"ok": True, "mode": self.mode, "orders_visible": data.get("count", 0)}
+
+    def create_order(self, amount_paise: int, receipt: str) -> dict:
+        return self._request("POST", "/orders", json_body={"amount": amount_paise, "currency": "INR", "receipt": receipt})
 
     def fetch_order(self, order_id: str) -> dict:
         return self._request("GET", f"/orders/{order_id}")

@@ -487,3 +487,52 @@ def test_x_test_mode_source():
     assert RazorpayAdapter({"mode": "TEST"}).source == "RAZORPAY_TEST"
     assert RazorpayAdapter({}).source == "RAZORPAY_TEST"
     assert RazorpayAdapter({"mode": "LIVE"}).source == "RAZORPAY_LIVE"
+
+
+# Y. Adapter create_order — genuine POST /orders with paise amount + Basic Auth
+def test_y_create_order_adapter():
+    from providers.razorpay_adapter import RazorpayAdapter
+
+    adapter = RazorpayAdapter({"key_id": "rzp_test_ABC123", "key_secret": "sec", "mode": "TEST"})
+    with mock.patch("providers.razorpay_adapter.requests.request") as m:
+        m.return_value = mock.Mock(status_code=200, json=lambda: {"id": "order_T9x", "amount": 50000, "currency": "INR", "status": "created"})
+        order = adapter.create_order(50000, "rcpt_test123")
+    assert m.call_args.args[0] == "POST"
+    assert m.call_args.args[1] == "https://api.razorpay.com/v1/orders"
+    assert m.call_args.kwargs["json"] == {"amount": 50000, "currency": "INR", "receipt": "rcpt_test123"}
+    assert m.call_args.kwargs["auth"] == ("rzp_test_ABC123", "sec")
+    assert order["id"] == "order_T9x"
+
+
+# Z. Checkout endpoint — owner-only, validates amount, honest provider error (never fabricated)
+def test_z_checkout_endpoint_guards():
+    url = f"{LOCAL}/api/integrations/razorpay/test-checkout/order"
+    owner = {"Authorization": "Bearer test_session_smoke_1787904424204"}
+
+    r = requests.post(url, json={"amount": 500}, timeout=60)
+    assert r.status_code in (401, 403)
+
+    for bad in (0, -5, "abc", 200000):
+        r = requests.post(url, json={"amount": bad}, headers=owner, timeout=60)
+        assert r.status_code == 400, f"amount={bad} expected 400 got {r.status_code}"
+
+    # dummy creds are configured by the guard fixture → a real provider call is
+    # attempted and must surface an honest ERROR (never a fabricated success)
+    r = requests.post(url, json={"amount": 500}, headers=owner, timeout=60)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ERROR"
+    assert "401" in body["detail"]
+
+
+# AA. Full webhook-to-case path for a checkout-created order id (real order_… format)
+def test_aa_checkout_order_webhook_to_case():
+    suf, oid, pay1, _ = _ids("tz")
+    r = _post(_pay_payload("payment.failed", pay1, oid, 50000, int(datetime.now(timezone.utc).timestamp()), "insufficient_funds"), f"evt_{suf}")
+    assert r.status_code == 200
+    assert r.json()["result"]["result"] == "case_created"
+    case = _case_for(oid)
+    assert case is not None
+    assert case["source"] == "RAZORPAY_TEST"
+    assert case["risk_evidence"]["order_amount"] == 500.0
+    _cleanup(suf)

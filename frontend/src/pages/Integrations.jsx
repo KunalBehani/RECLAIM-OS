@@ -122,6 +122,55 @@ export default function Integrations() {
     }
   };
 
+  const [checkoutAmount, setCheckoutAmount] = useState("500");
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutState, setCheckoutState] = useState(null);
+
+  const loadCheckoutJs = () => new Promise((resolve, reject) => {
+    if (window.Razorpay) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load Razorpay Checkout script"));
+    document.body.appendChild(s);
+  });
+
+  const createTestPayment = async () => {
+    setCheckoutBusy(true);
+    setCheckoutState(null);
+    try {
+      const res = await api.post("/integrations/razorpay/test-checkout/order", { amount: Number(checkoutAmount) });
+      const d = res.data;
+      if (d.status !== "READY") {
+        setCheckoutState(d);
+        toast.error(d.detail || "Genuine order creation failed at provider");
+        return;
+      }
+      await loadCheckoutJs();
+      const rzp = new window.Razorpay({
+        key: d.key_id,
+        order_id: d.order_id,
+        amount: d.amount_paise,
+        currency: d.currency,
+        name: "RECLAIM OS — Phase 1 Verification",
+        description: `Genuine TEST order ${d.order_id}`,
+        theme: { color: "#072654" },
+        handler: () => { toast.success("Payment authorized — awaiting genuine provider webhooks."); load(); },
+        modal: { ondismiss: () => toast.info("Checkout closed.") },
+      });
+      rzp.on("payment.failed", () => {
+        toast.info("payment.failed emitted — the genuine webhook arrives via the registered endpoint shortly.");
+        load();
+      });
+      rzp.open();
+      setCheckoutState(d);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message || "Checkout launch failed");
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
   const status = config?.status || "NOT_CONFIGURED";
   const configured = status !== "NOT_CONFIGURED";
 
@@ -246,6 +295,41 @@ export default function Integrations() {
             <Copy className="h-3.5 w-3.5" /> Copy endpoint
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="test-checkout-section">
+        <h2 className="font-heading text-lg font-medium text-slate-900">Real Test Checkout — Phase 1 Verification</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Creates a genuine Razorpay TEST order via the provider API (nothing simulated), then opens Razorpay Standard Checkout.
+          To fail the payment intentionally, use <span className="font-mono">failure@razorpay</span> as the email in Checkout.
+          The genuine payment.failed webhook then flows through signature verification, detection and case creation —
+          watch Integration Health and Events. Requires the webhook endpoint registered in your Razorpay dashboard.
+        </p>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Amount (INR)</label>
+            <input data-testid="test-checkout-amount-input" type="number" min="1" max="100000" value={checkoutAmount}
+              onChange={(e) => setCheckoutAmount(e.target.value)}
+              className="mt-1 w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none" />
+          </div>
+          <button data-testid="create-test-payment-btn" onClick={createTestPayment} disabled={!configured || checkoutBusy}
+            className="rounded-lg bg-[#072654] px-4 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#0a3168] disabled:opacity-40">
+            {checkoutBusy ? "Creating order…" : "Create Test Payment"}
+          </button>
+        </div>
+        {checkoutState?.status === "READY" && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs" data-testid="test-checkout-result">
+            <span className="font-medium text-slate-900">Checkout launched for genuine TEST order</span>{" "}
+            <span className="font-mono text-slate-700">{checkoutState.order_id}</span>{" "}
+            <span className="text-slate-500">— ₹{checkoutState.amount_inr} INR. Complete or fail the payment in the Razorpay window.</span>
+          </div>
+        )}
+        {checkoutState?.status === "ERROR" && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700" data-testid="test-checkout-error">
+            ERROR — {checkoutState.detail}
+          </div>
+        )}
+        {!configured && <p className="mt-3 text-xs text-amber-600">Connect Razorpay TEST MODE first.</p>}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="integration-health">

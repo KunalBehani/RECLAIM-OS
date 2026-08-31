@@ -127,6 +127,48 @@ async def razorpay_diagnostics(request: Request):
     }
 
 
+@router.post("/razorpay/test-checkout/order")
+async def create_test_checkout_order(request: Request):
+    """Phase-1 verification: create a GENUINE Razorpay TEST order through the
+    provider API and return the Standard Checkout launch config. key_id is
+    returned in full because it is public by design (embedded in every
+    checkout page); key_secret never leaves the server."""
+    user = await require_owner(request)
+    config = await get_integration("razorpay")
+    if not config:
+        raise HTTPException(status_code=400, detail="Razorpay integration is not configured.")
+    body = await request.json()
+    try:
+        amount_inr = float(body.get("amount", 500))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="amount must be a number (INR).")
+    if not 1 <= amount_inr <= 100000:
+        raise HTTPException(status_code=400, detail="amount must be between ₹1 and ₹100,000.")
+    amount_paise = int(round(amount_inr * 100))
+    receipt = f"rcpt_{uuid.uuid4().hex[:12]}"
+    adapter = RazorpayAdapter(config)
+    try:
+        order = await asyncio.to_thread(adapter.create_order, amount_paise, receipt)
+    except IntegrationError as exc:
+        await write_audit(actor=user["email"], event_type="TEST_CHECKOUT_ORDER_FAILED",
+                          reason=f"Genuine Razorpay TEST order creation failed: {exc}")
+        return {"status": "ERROR", "detail": str(exc)}
+    await write_audit(
+        actor=user["email"], event_type="TEST_CHECKOUT_ORDER_CREATED",
+        reason=f"Genuine Razorpay TEST order created for checkout verification (₹{amount_paise / 100:.2f}).",
+        after_state={"order_id": order.get("id"), "amount_paise": amount_paise, "currency": "INR", "mode": "TEST", "receipt": receipt},
+    )
+    return {
+        "status": "READY",
+        "order_id": order.get("id"),
+        "amount_paise": amount_paise,
+        "amount_inr": amount_paise / 100,
+        "currency": "INR",
+        "key_id": (config.get("key_id") or "").strip(),
+        "mode": "TEST",
+    }
+
+
 @router.delete("/razorpay")
 async def disconnect_razorpay(request: Request):
     user = await require_owner(request)

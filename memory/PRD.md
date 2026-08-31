@@ -82,6 +82,12 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Full backend suite: **186 passed, 0 failed** (371s). Secret-leak scan of backend logs clean.
 - **Regression note**: an interrupted duplicate suite run left dummy test creds in the DB, which the guard then faithfully restored — the real pair was lost from the DB and must be re-entered once by the user (secrets are never readable back by design).
 
+## Implemented (2026-08-31, Real Razorpay TEST Checkout — Phase 1 verification)
+- `POST /api/integrations/razorpay/test-checkout/order` (owner-only): creates a GENUINE Razorpay TEST order via `RazorpayAdapter.create_order` (real `POST /v1/orders`, paise conversion, receipt, sanitized errors, audit events `TEST_CHECKOUT_ORDER_CREATED/FAILED`). Amount configurable ₹1–₹100,000, default ₹500. Returns checkout launch config incl. full public key_id (public by design; key_secret never leaves server).
+- Integrations page: "Real Test Checkout — Phase 1 Verification" section (`test-checkout-section`, `create-test-payment-btn`, `test-checkout-amount-input`) — amount input, dynamic checkout.js load, Razorpay Standard Checkout launch with real order_id, `payment.failed`/success/dismiss handlers, guidance for intentional failure via failure@razorpay. No attribution/verification logic touched.
+- Verified live: genuine order `order_TWJxeoHMZ5H58J` (₹500) created at Razorpay with the user's real verified credentials.
+- Tests: Y (adapter POST body/auth/url), Z (endpoint owner-only + amount validation + honest provider ERROR), AA (checkout-format order → genuine signed webhook → case created, ₹500). Full suite: **189 passed, 0 failed**.
+
 ## Prioritized Backlog
 ### P0 (remaining)
 - None (Razorpay 401 diagnosed to external cause; awaiting valid user credentials to complete CONNECTED verification)
