@@ -374,6 +374,13 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
     amount_at_risk = float(case.get("amount_at_risk") or 0)
     recovered_amount = round(min(amount_at_risk, success_amount), 2)
 
+    # On real provider-sourced cases a SIMULATED action never actually
+    # contacted the customer — it can never earn recovery attribution.
+    real_source = case.get("source") in ("RAZORPAY_TEST", "RAZORPAY_LIVE")
+
+    def _creditable(a):
+        return a.get("action_type") in ATTRIBUTABLE_ACTIONS and not (real_source and a.get("simulated"))
+
     if success_dt and reference_dt and success_dt < reference_dt:
         updates = {
             "status": "INVALID",
@@ -390,7 +397,7 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
     else:
         executed_before = [
             a for a in executed
-            if a.get("action_type") in ATTRIBUTABLE_ACTIONS
+            if _creditable(a)
             and parse_dt(a.get("executed_time")) and success_dt and parse_dt(a["executed_time"]) <= success_dt
         ]
         if executed_before:
@@ -415,8 +422,13 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
         else:
             executed_after = [
                 a for a in executed
-                if a.get("action_type") in ATTRIBUTABLE_ACTIONS
+                if _creditable(a)
                 and parse_dt(a.get("executed_time")) and success_dt and parse_dt(a["executed_time"]) > success_dt
+            ]
+            disregarded_simulated = [
+                a for a in executed
+                if real_source and a.get("simulated") and a.get("action_type") in ATTRIBUTABLE_ACTIONS
+                and parse_dt(a.get("executed_time")) and success_dt and parse_dt(a["executed_time"]) <= success_dt
             ]
             strength = "UNCERTAIN" if executed_after else "NONE"
             updates = {
@@ -428,12 +440,19 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
                 "attribution": "NONE",
                 "attribution_strength": strength,
             }
-            reason = (
-                f"Successful settlement {success_ref} verified with no prior system action. "
-                "Natural recovery — NOT counted as system-recovered revenue."
-                if not executed_after
-                else f"Successful settlement {success_ref} occurred BEFORE the system action executed; attribution is impossible (UNCERTAIN). Counted as natural recovery, NOT system-recovered revenue."
-            )
+            if executed_after:
+                reason = f"Successful settlement {success_ref} occurred BEFORE the system action executed; attribution is impossible (UNCERTAIN). Counted as natural recovery, NOT system-recovered revenue."
+            elif disregarded_simulated:
+                reason = (
+                    f"Successful settlement {success_ref} verified. A SIMULATED {disregarded_simulated[-1]['action_type']} action was recorded before settlement, "
+                    "but no genuine customer-facing action occurred — simulated executions never earn attribution on provider-sourced cases. "
+                    "Natural recovery — NOT counted as system-recovered revenue."
+                )
+            else:
+                reason = (
+                    f"Successful settlement {success_ref} verified with no prior system action. "
+                    "Natural recovery — NOT counted as system-recovered revenue."
+                )
 
     updates.update({"verification_evidence": evidence, "closed_at": now_iso(), "action_status": "CLOSED"})
     await db.recovery_cases.update_one({"case_id": case["case_id"]}, {"$set": updates})

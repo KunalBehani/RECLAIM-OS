@@ -123,15 +123,20 @@ def test_non_attributable_action_before_settlement_earns_nothing(action):
         _cleanup(suf)
 
 
-def test_attributable_action_still_earns_moderate():
+def test_simulated_customer_action_earns_nothing_on_provider_case():
+    """SEND_RECOVERY_LINK executed through the real execute endpoint is a
+    SIMULATED action — on provider-sourced cases it never earns attribution,
+    so a later settlement is NATURALLY_RECOVERED with zero verified recovery."""
     cid, case = _flow("SEND_RECOVERY_LINK")
     suf = case["order_key"].split("order_")[1]
     try:
-        assert case["status"] == "VERIFIED_RECOVERED", f"got {case['status']}"
-        assert case.get("attribution_strength") == "MODERATE", \
+        assert case["status"] == "NATURALLY_RECOVERED", f"got {case['status']}"
+        assert case.get("attribution_strength") == "NONE", \
             f"got {case.get('attribution_strength')}"
-        assert float(case.get("recovered_amount") or 0) == 2500.0, \
+        assert float(case.get("recovered_amount") or 0) == 0.0, \
             f"got {case.get('recovered_amount')}"
+        assert float(case.get("natural_recovered_amount") or 0) == 2500.0, \
+            f"got {case.get('natural_recovered_amount')}"
     finally:
         _cleanup(suf)
 

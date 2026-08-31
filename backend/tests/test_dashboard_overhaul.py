@@ -114,10 +114,21 @@ class TestKpis:
         assert num == statuses.get("VERIFIED_RECOVERED", 0)
 
     def test_at_risk_sum_matches_cases(self, client, summary):
-        r = client.get(f"{BASE_URL}/api/cases", params={"stage": "at_risk", "limit": 500}, timeout=120)
-        totals = {}
-        for c in r.json()["cases"]:
-            totals[c["currency"]] = round(totals.get(c["currency"], 0) + float(c["amount_at_risk"] or 0), 2)
+        def _fetch():
+            s = client.get(f"{BASE_URL}/api/dashboard/summary", timeout=120).json()
+            r = client.get(f"{BASE_URL}/api/cases", params={"stage": "at_risk", "limit": 5000}, timeout=120)
+            t = {}
+            for c in r.json()["cases"]:
+                t[c["currency"]] = round(t.get(c["currency"], 0) + float(c["amount_at_risk"] or 0), 2)
+            return s, t
+        summary, totals = _fetch()
+        # xdist parallelism can add/settle cases between the two reads; re-fetch
+        import time
+        for _ in range(3):
+            if all(summary["kpis"]["revenue_at_risk"].get(ccy, 0) == pytest.approx(amt, abs=1.0) for ccy, amt in totals.items()):
+                break
+            time.sleep(1)
+            summary, totals = _fetch()
         for ccy, amt in totals.items():
             assert summary["kpis"]["revenue_at_risk"][ccy] == pytest.approx(amt, abs=1.0)
 
@@ -230,10 +241,16 @@ class TestCases:
     def test_source_filter(self, client, summary):
         counts = {s["source"]: s["count"] for s in summary["charts"]["sources"]}
         for source, count in counts.items():
-            r = client.get(f"{BASE_URL}/api/cases", params={"source": source, "limit": 500}, timeout=120)
+            r = client.get(f"{BASE_URL}/api/cases", params={"source": source, "limit": 5000}, timeout=120)
             assert r.status_code == 200
             cases = r.json()["cases"]
-            assert len(cases) == min(count, 500)
+            if len(cases) != min(count, 5000):
+                # xdist parallelism can add cases after the summary snapshot; re-fetch both
+                fresh = client.get(f"{BASE_URL}/api/dashboard/summary", timeout=120).json()
+                count = {s["source"]: s["count"] for s in fresh["charts"]["sources"]}.get(source, 0)
+                r = client.get(f"{BASE_URL}/api/cases", params={"source": source, "limit": 5000}, timeout=120)
+                cases = r.json()["cases"]
+            assert len(cases) == min(count, 5000), f"{source}: api={len(cases)} summary={count}"
             assert all(c["source_category"] == source for c in cases)
 
     def test_source_filter_empty_state(self, client, summary):

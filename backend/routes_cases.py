@@ -150,7 +150,7 @@ async def list_cases(request: Request, status: str | None = None, outcome: str |
     if source:
         enriched = [c for c in enriched if c["source_category"] == source]
     enriched = _sort_cases(enriched, sort)
-    return {"cases": enriched[: min(limit, 500)]}
+    return {"cases": enriched[: min(limit, 5000)]}
 
 
 @router.get("/cases/{case_id}")

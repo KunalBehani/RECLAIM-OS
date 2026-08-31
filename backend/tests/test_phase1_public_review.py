@@ -230,15 +230,17 @@ class TestWebhookSecurity:
 class TestAttribution:
     @staticmethod
     def _insert_action(case_id, action_type="SEND_RECOVERY_LINK"):
+        """Fixture: a GENUINELY executed (non-simulated) customer-facing action.
+        Simulated actions never earn attribution on provider-sourced cases."""
         mdb.recovery_actions.insert_one({
             "action_id": f"act_{uuid.uuid4().hex[:12]}", "case_id": case_id,
             "action_type": action_type, "label": "Send Payment Recovery Link",
             "scheduled_time": datetime.now(timezone.utc).isoformat(),
             "executed_time": datetime.now(timezone.utc).isoformat(),
-            "execution_mode": "SIMULATED", "simulated": True, "approval_status": "AUTO_APPROVED",
+            "execution_mode": "REAL", "simulated": False, "approval_status": "AUTO_APPROVED",
             "policy_result": "ALLOW", "expected_incremental_value": 0, "estimated_cost": 12.0,
             "outcome": "PENDING", "idempotency_key": f"{case_id}:{action_type}:r6",
-            "provider_reference": "SIM-R6", "created_at": datetime.now(timezone.utc).isoformat(),
+            "provider_reference": "REAL-R6", "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
     def test_no_action_late_capture_is_natural(self):

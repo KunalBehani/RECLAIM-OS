@@ -298,15 +298,17 @@ def test_m_partial_payment():
     _clear_actions(case["case_id"])
 
     async def _insert_action():
+        # Fixture: a GENUINELY executed (non-simulated) customer-facing action —
+        # simulated actions never earn attribution on provider-sourced cases.
         await _db().recovery_actions.insert_one({
             "action_id": f"act_{uuid.uuid4().hex[:12]}", "case_id": case["case_id"],
             "action_type": "SEND_RECOVERY_LINK", "label": "Send Payment Recovery Link",
             "scheduled_time": datetime.now(timezone.utc).isoformat(),
             "executed_time": datetime.now(timezone.utc).isoformat(),
-            "execution_mode": "SIMULATED", "simulated": True, "approval_status": "AUTO_APPROVED",
+            "execution_mode": "REAL", "simulated": False, "approval_status": "AUTO_APPROVED",
             "policy_result": "ALLOW", "expected_incremental_value": 0, "estimated_cost": 12.0,
             "outcome": "PENDING", "idempotency_key": f"{case['case_id']}:SEND_RECOVERY_LINK:test",
-            "provider_reference": "SIM-TEST", "created_at": datetime.now(timezone.utc).isoformat(),
+            "provider_reference": "REAL-TEST", "created_at": datetime.now(timezone.utc).isoformat(),
         })
     _run(_insert_action())
     settled = int(datetime.now(timezone.utc).timestamp()) + 1
@@ -535,4 +537,37 @@ def test_aa_checkout_order_webhook_to_case():
     assert case is not None
     assert case["source"] == "RAZORPAY_TEST"
     assert case["risk_evidence"]["order_amount"] == 500.0
+    _cleanup(suf)
+
+
+# AB. SIMULATED customer-facing action on a provider-sourced case never earns
+# attribution — a later settlement is NATURALLY_RECOVERED, not VERIFIED_RECOVERED
+def test_ab_simulated_action_no_attribution_provider_case():
+    suf, oid, pay1, pay2 = _ids("tab")
+    now = int(datetime.now(timezone.utc).timestamp())
+    _post(_pay_payload("payment.failed", pay1, oid, 50000, now - 300, "insufficient_funds"), f"evt_{suf}1")
+    case = _case_for(oid)
+    _clear_actions(case["case_id"])
+
+    async def _insert_sim_action():
+        await _db().recovery_actions.insert_one({
+            "action_id": f"act_{uuid.uuid4().hex[:12]}", "case_id": case["case_id"],
+            "action_type": "SEND_RECOVERY_LINK", "label": "Send Payment Recovery Link",
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+            "executed_time": datetime.now(timezone.utc).isoformat(),
+            "execution_mode": "SIMULATED", "simulated": True, "approval_status": "AUTO_APPROVED",
+            "policy_result": "ALLOW", "expected_incremental_value": 0, "estimated_cost": 12.0,
+            "outcome": "PENDING", "idempotency_key": f"{case['case_id']}:SEND_RECOVERY_LINK:sim",
+            "provider_reference": "SIM-TEST", "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    _run(_insert_sim_action())
+    settled = int(datetime.now(timezone.utc).timestamp()) + 60
+    _post(_pay_payload("payment.captured", pay2, oid, 50000, settled), f"evt_{suf}2")
+    case = _case_for(oid)
+    assert case["status"] == "NATURALLY_RECOVERED", case["status"]
+    assert case["attribution_strength"] == "NONE"
+    assert case["recovered_amount"] == 0.0
+    assert case["natural_recovered_amount"] == 500.0
+    audit = _run(_db().audit_events.find({"case_id": case["case_id"], "event_type": "CASE_CLOSED"}, {"_id": 0}).to_list(5))
+    assert any("SIMULATED" in e["reason"] for e in audit), "audit must record the disregarded SIMULATED action"
     _cleanup(suf)
