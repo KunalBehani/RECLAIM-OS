@@ -99,6 +99,84 @@ async def test_connection(request: Request):
         return {"status": "ERROR", "detail": str(exc)}
 
 
+# ---------------- Resend notification channel (Phase 1.5) ----------------
+# API key lives ONLY in backend env; the stored doc holds non-secret state
+# (enabled flag + test result). Nothing here ever returns the key.
+
+@router.get("/resend")
+async def resend_status(request: Request):
+    await require_owner(request)
+    doc = await db.integrations.find_one({"provider": "resend"}, {"_id": 0}) or {}
+    key_present = bool(os.environ.get("EMERGENT_EMAIL_KEY"))
+    enabled = bool(doc.get("enabled"))
+    if not key_present or not enabled:
+        status = "NOT_CONFIGURED"
+    elif doc.get("last_test_ok") is False:
+        status = "ERROR"
+    elif doc.get("last_test_ok"):
+        status = "CONNECTED"
+    else:
+        status = "NOT_CONFIGURED"
+    return {
+        "provider": "resend", "channel": "email", "enabled": enabled, "status": status,
+        "last_test_at": doc.get("last_test_at"), "last_error": doc.get("last_error"),
+    }
+
+
+@router.put("/resend/config")
+async def resend_config(request: Request):
+    user = await require_owner(request)
+    body = await request.json()
+    enabled = bool(body.get("enabled"))
+    await db.integrations.update_one(
+        {"provider": "resend"},
+        {"$set": {"provider": "resend", "channel": "email", "enabled": enabled,
+                  "updated_at": datetime.now(timezone.utc).isoformat()},
+         "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    await write_audit(actor=user["email"], event_type="NOTIFICATION_CONFIG_UPDATED",
+                      reason=f"Customer notification channel (Resend) {'ENABLED' if enabled else 'DISABLED'}.",
+                      after_state={"provider": "resend", "enabled": enabled})
+    return {"saved": True, "enabled": enabled}
+
+
+@router.post("/resend/test-connection")
+async def resend_test_connection(request: Request):
+    """Genuine end-to-end check: sends a real test email to the owner address
+    from server-side config (never caller-supplied recipients)."""
+    user = await require_owner(request)
+    from notifications.base import NotificationError
+    from notifications.resend_adapter import ResendNotificationAdapter
+
+    owner = os.environ.get("OWNER_EMAIL")
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        result = await ResendNotificationAdapter().test_connection(recipient=owner)
+    except NotificationError as exc:
+        await db.integrations.update_one({"provider": "resend"},
+            {"$set": {"last_test_ok": False, "last_test_at": now, "last_error": str(exc)}}, upsert=True)
+        await write_audit(actor=user["email"], event_type="NOTIFICATION_TEST_FAILED",
+                          reason=f"Notification channel test failed: {exc}")
+        return {"status": "ERROR", "detail": str(exc)}
+    await db.integrations.update_one({"provider": "resend"},
+        {"$set": {"provider": "resend", "enabled": True, "last_test_ok": True, "last_test_at": now, "last_error": None}},
+        upsert=True)
+    await write_audit(actor=user["email"], event_type="NOTIFICATION_TEST_PASSED",
+                      reason=f"Genuine test email delivered to the owner inbox (provider ref {result.provider_reference}). Channel CONNECTED.",
+                      after_state={"provider": "resend", "status": "CONNECTED"})
+    return {"status": "CONNECTED", "detail": f"Test email sent to the owner inbox (ref {result.provider_reference})."}
+
+
+@router.get("/resend/diagnostics")
+async def resend_diagnostics(request: Request):
+    """Masked metadata only — never the API key."""
+    await require_owner(request)
+    from notifications.resend_adapter import masked_diagnostics
+    doc = await db.integrations.find_one({"provider": "resend"}, {"_id": 0}) or {}
+    return masked_diagnostics(bool(doc.get("enabled")))
+
+
 @router.get("/razorpay/diagnostics")
 async def razorpay_diagnostics(request: Request):
     """Owner-only safe diagnostic view of the stored Razorpay credential state.

@@ -34,6 +34,39 @@ export default function Integrations() {
   const [sweepBusy, setSweepBusy] = useState(false);
   const [labResult, setLabResult] = useState(null);
   const [labBusy, setLabBusy] = useState(null);
+  const [resend, setResend] = useState(null);
+  const [resendBusy, setResendBusy] = useState(false);
+
+  const loadResend = useCallback(() => {
+    api.get("/integrations/resend").then((res) => setResend(res.data)).catch(() => {});
+  }, []);
+
+  const toggleResend = async (enabled) => {
+    setResendBusy(true);
+    try {
+      await api.put("/integrations/resend/config", { enabled });
+      toast.success(enabled ? "Customer notifications ENABLED (real emails will be sent)" : "Customer notifications disabled");
+      loadResend();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Update failed");
+    } finally {
+      setResendBusy(false);
+    }
+  };
+
+  const testResend = async () => {
+    setResendBusy(true);
+    try {
+      const res = await api.post("/integrations/resend/test-connection");
+      if (res.data.status === "CONNECTED") toast.success(res.data.detail);
+      else toast.error(res.data.detail || "Notification test failed");
+      loadResend();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Notification test failed");
+    } finally {
+      setResendBusy(false);
+    }
+  };
 
   const load = useCallback(() => {
     api.get("/integrations").then((res) => {
@@ -42,7 +75,8 @@ export default function Integrations() {
       setEndpointPath(res.data.webhook_endpoint_path);
     }).catch(() => {});
     api.get("/integrations/razorpay/health").then((res) => setHealth(res.data)).catch(() => {});
-  }, []);
+    loadResend();
+  }, [loadResend]);
   useEffect(() => { load(); }, [load]);
 
   const save = async () => {
@@ -295,6 +329,40 @@ export default function Integrations() {
             <Copy className="h-3.5 w-3.5" /> Copy endpoint
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="resend-section">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-heading text-lg font-medium text-slate-900">Customer Notifications — Resend (Email)</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Genuine customer-facing recovery emails for provider cases. When enabled, an eligible Razorpay TEST case
+              triggers a REAL recovery email with a same-order secure retry link — the only execution mode that can earn
+              recovery attribution. When disabled, execution stays SIMULATED and never earns attribution.
+              The API key lives server-side only and is never exposed to this page.
+            </p>
+          </div>
+          <StatusBadge value={resend?.status || "NOT_CONFIGURED"} />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {!resend?.enabled ? (
+            <button data-testid="resend-enable-btn" onClick={() => toggleResend(true)} disabled={resendBusy}
+              className="rounded-lg bg-[#072654] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#0a3168] disabled:opacity-40">
+              Enable notifications
+            </button>
+          ) : (
+            <button data-testid="resend-disable-btn" onClick={() => toggleResend(false)} disabled={resendBusy}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40">
+              Disable
+            </button>
+          )}
+          <button data-testid="resend-test-btn" onClick={testResend} disabled={resendBusy}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40">
+            {resendBusy ? "Working…" : "Send test email (genuine)"}
+          </button>
+          {resend?.last_test_at && <span className="text-xs text-slate-500" data-testid="resend-last-test">Last test: {fmtTime(resend.last_test_at)}</span>}
+        </div>
+        {resend?.last_error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700" data-testid="resend-error">{resend.last_error}</div>}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="test-checkout-section">

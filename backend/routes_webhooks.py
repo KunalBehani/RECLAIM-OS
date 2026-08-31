@@ -86,6 +86,7 @@ async def process_webhook_payload(payload: dict, actor="webhook") -> dict:
         "order_id": data.get("order_id"),
         "invoice_id": data.get("invoice_id"),
         "customer_reference": data.get("customer_reference"),
+        "email": data.get("email"),
         "amount": amount,
         "currency": (str(data.get("currency")).upper() if data.get("currency") else None),
         "status": status,

@@ -16,6 +16,7 @@ from routes_cases import router as cases_router  # noqa: E402
 from routes_dashboard import router as dashboard_router  # noqa: E402
 from routes_ingest import router as ingest_router  # noqa: E402
 from routes_integrations import router as integrations_router  # noqa: E402
+from routes_recovery import router as recovery_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
 from routes_simulate import router as simulate_router  # noqa: E402
 from routes_webhooks import router as webhooks_router  # noqa: E402
@@ -29,7 +30,7 @@ async def root():
     return {"service": "RECLAIM OS API", "status": "ok", "version": "1.0.0"}
 
 
-for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router):
+for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router, recovery_router):
     api_router.include_router(router)
 
 app.include_router(api_router)

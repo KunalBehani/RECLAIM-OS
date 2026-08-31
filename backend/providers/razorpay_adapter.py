@@ -79,6 +79,7 @@ class RazorpayAdapter(ProviderAdapter):
             "order_id": entity.get("order_id"),
             "invoice_id": entity.get("invoice_id"),
             "customer_reference": entity.get("email") or entity.get("contact"),
+            "email": entity.get("email"),
             "amount": round((entity.get("amount") or 0) / 100, 2),
             "currency": entity.get("currency"),
             "status": EVENT_STATUS[event_type],

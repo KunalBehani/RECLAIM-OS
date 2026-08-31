@@ -342,6 +342,8 @@ export default function CaseDetail() {
                       <span>{fmtTime(a.timestamp)}</span>
                       <span>· {a.source}</span>
                       {a.simulated && <StatusBadge value="SIMULATED" />}
+                      {!a.simulated && a.execution_mode === "REAL" && <StatusBadge value="REAL" />}
+                      {a.notification && <StatusBadge value={`EMAIL ${a.notification.status}`} />}
                       {a.failure_code && <span className="font-mono text-red-500">{a.failure_code}</span>}
                     </div>
                   </div>

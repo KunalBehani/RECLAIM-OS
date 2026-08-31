@@ -11,6 +11,7 @@ import Ingest from "@/pages/Ingest";
 import ReviewQueue from "@/pages/ReviewQueue";
 import Events from "@/pages/Events";
 import Integrations from "@/pages/Integrations";
+import PayRetry from "@/pages/PayRetry";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -37,6 +38,7 @@ function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/pay/:token" element={<PayRetry />} />
       <Route path="/" element={<Protected><Layout /></Protected>}>
         <Route index element={<Dashboard />} />
         <Route path="cases/:caseId" element={<CaseDetail />} />

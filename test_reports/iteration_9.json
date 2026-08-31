@@ -1,0 +1,37 @@
+{
+  "summary": "Phase 1.5 (Resend notification channel + public tokenized same-order retry) review. Backend: 12/12 new pytest probes passed (/app/backend/tests/test_iteration9_phase15_probe.py) covering resend status/diagnostics masking, anonymous rejection of all 3 resend endpoints (incl. PUT /config), public retry 404/400 negatives, invalid-signature rejection with no linked_payment_id, order-mismatch rejection, and idempotent completion (duplicate:true, exactly 1 RECOVERY_PAYMENT_LINKED audit) using an ephemeral synthetic case/action that was deleted afterwards. Frontend: /pay/{invalid} shows pay-retry-error without crashing; /pay/{real token rct_b51b...4002ee7cf15} renders order_LAB74F98C, Rs 6,750.00 and an enabled 'Pay securely via Razorpay' button; /integrations (owner cookie) renders resend-section with CONNECTED badge, Disable + Send test email buttons and the Real Test Checkout section; no key-like ('ek_...') or key_secret/webhook_secret material in page source or in any of the 10 captured /api responses. Honored all constraints: never called PUT resend/config, /cases/{id}/execute, test-lab endpoints, checkout automation, or the full pytest suite; razorpay/resend config untouched (resend still enabled=true, last_test_ok=true).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/recovery/pay/{token}/complete", "issue": "Unauthenticated 500 Internal Server Error on malformed input: body 'notjson' (raw await request.json() raises JSONDecodeError) and wrong-typed fields ({\"razorpay_payment_id\":123,\"razorpay_order_id\":null,\"razorpay_signature\":[]} -> .strip() on int/list). Should be 400/422. Public endpoint, so any bot can generate 500s."},
+      {"endpoint": "GET /api/recovery/pay/{token}", "issue": "Recovery tokens have no expiry/TTL field even though user-facing copy says 'invalid or expired'; a token stays valid indefinitely (9 live tokens found in recovery_actions). Consider expires_at + single-use semantics after linking."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/pay/{token} public retry page", "issues": ["Footer reassurance line uses text-[11px] text-slate-400 on white (contrast ~2.6:1, below WCAG AA for small text) - use slate-500/600", "No visible merchant/order context beyond order id; acceptable for MVP"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9_phase15_probe.py",
+    "/app/test_reports/pytest/iteration9_results.xml"
+  ],
+  "action_items": [
+    "Add a Pydantic request model (or try/except around request.json()) to POST /api/recovery/pay/{token}/complete so malformed/wrong-typed bodies return 400/422 instead of 500.",
+    "Optional hardening: add expires_at (and/or single-use invalidation) to recovery_token, plus basic rate limiting on the public /api/recovery/pay/* endpoints."
+  ],
+  "critical_code_review_comments": [
+    "routes_recovery.py complete_retry parses the body with raw await request.json() and calls .strip() on untyped values - the only correctness gap found in Phase 1.5; everything else (HMAC compare_digest signature check, idempotency guard before audit write, _id excluded from all finds, no secret in responses) is correct.",
+    "Signature verification happens before any mutation and the duplicate guard returns before write_audit, so attribution cannot be double-counted - verified empirically."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration9_phase15_probe.py"],
+  "success_rate": {"backend": "12/12 probes passed (100%); 2 additional negative-input probes revealed 500s (see minor issues)", "frontend": "100% of requested checks passed"},
+  "seed_data_creation": "One ephemeral synthetic case/action (case_TESTIT9*, act_TESTIT9*, source TEST_IT9) created and deleted within the idempotency test; verified 0 leftovers in recovery_cases/recovery_actions/audit_events.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Owner session token test_session_smoke_1787904424204 (Bearer header and session_token cookie both work).",
+  "context_for_next_testing_agent": "Live demo state must stay intact: resend integration doc is enabled=true/last_test_ok=true - never PUT /api/integrations/resend/config or POST resend/test-connection (sends real email). Real unlinked recovery token for read-only probes: rct_b51b5051253e49aabc781da3f35fe4002ee7cf15 (case_7f498c5df267 / order_LAB74F98C, Rs 6750, status EVALUATED). To test valid completion without touching live data, create your own case+action and forge the signature with HMAC-SHA256(key_secret, 'order|payment') reading key_secret from integrations.razorpay (see test_iteration9_phase15_probe.py TestIdempotentCompletion). Do NOT run the full pytest suite (test_notifications.py sends genuine emails) and do not use the razorpay_integration_guard fixture during a live demo.",
+  "rca_of_the_issue": "500 on /api/recovery/pay/{token}/complete: the handler reads the JSON body manually (body = await request.json()) with no schema, so (a) invalid JSON raises json.JSONDecodeError inside the handler and (b) non-string field values raise AttributeError on .strip(); both escape as unhandled exceptions -> 500. Reproduce: curl -X POST <base>/api/recovery/pay/<real-token>/complete -H 'Content-Type: application/json' --data 'notjson'. Fix: declare a Pydantic BaseModel body with three required str fields."
+}

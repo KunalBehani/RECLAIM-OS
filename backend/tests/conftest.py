@@ -35,6 +35,11 @@ def razorpay_integration_guard():
     ]
     with FileLock("/tmp/reclaim_razorpay_integration_test.lock"):
         saved = mdb.integrations.find_one({"provider": "razorpay"})
+        # The notification channel must be DISABLED during guarded modules —
+        # otherwise ambient enabled state would make executions REAL and leak
+        # genuine sends into unrelated tests. Restored afterwards.
+        saved_resend = mdb.integrations.find_one({"provider": "resend"})
+        mdb.integrations.update_one({"provider": "resend"}, {"$set": {"provider": "resend", "enabled": False}}, upsert=True)
         now = datetime.now(timezone.utc).isoformat()
         mdb.integrations.update_one(
             {"provider": "razorpay"},
@@ -42,6 +47,11 @@ def razorpay_integration_guard():
             upsert=True,
         )
         yield
+        if saved_resend is None:
+            mdb.integrations.delete_many({"provider": "resend"})
+        else:
+            saved_resend.pop("_id", None)
+            mdb.integrations.replace_one({"provider": "resend"}, saved_resend, upsert=True)
         if saved is None:
             mdb.integrations.delete_one({"provider": "razorpay"})
         else:
