@@ -40,7 +40,7 @@ async def _load(token: str):
     case = await db.recovery_cases.find_one({"case_id": action["case_id"]}, {"_id": 0})
     if not case:
         raise HTTPException(status_code=404, detail="Recovery case not found.")
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config:
         raise HTTPException(status_code=400, detail="Payments are not configured.")
     return action, case, config

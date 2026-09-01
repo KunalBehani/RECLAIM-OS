@@ -609,8 +609,11 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
             policy_result=policy_result,
             approval_status="AUTO_APPROVED",
         )
-        outcome["executed"] = not res["duplicate"]
-        outcome["action_id"] = res["action"]["action_id"]
+        if res.get("blocked"):
+            outcome["note"] = f"LIVE action blocked by live-safety gates ({res['blocked']}). Ingestion, analysis and verification continue; nothing was executed."
+        else:
+            outcome["executed"] = not res["duplicate"]
+            outcome["action_id"] = res["action"]["action_id"]
         if rec == "SCHEDULED_RECHECK":
             await verify_case(case_id, actor="scheduled-recheck")
     elif policy_result["decision"] == "ALLOW":

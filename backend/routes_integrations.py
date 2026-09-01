@@ -33,10 +33,17 @@ async def require_owner(request: Request) -> dict:
 @router.get("")
 async def list_integrations(request: Request):
     await get_current_user(request)
-    doc = await get_integration("razorpay")
+    doc = await get_integration("razorpay", "TEST")
+    live_doc = await get_integration("razorpay", "LIVE")
     return {
         "integrations": [public_config(doc)],
-        "live_mode": {"status": "UNAVAILABLE", "note": "Live mode is not enabled in this phase. Live credentials are not accepted."},
+        "live_mode": {
+            "status": (live_doc or {}).get("status", "NOT_CONFIGURED"),
+            "configured": bool(live_doc),
+            "activated": bool(live_doc and live_doc.get("live_activated")),
+            "webhook_endpoint_path": "/api/webhooks/razorpay/live",
+            "note": "Phase 2A readiness: LIVE ingestion, verification, reconciliation and audit only. No real-money recovery execution.",
+        },
         "webhook_endpoint_path": "/api/webhooks/razorpay",
     }
 
@@ -78,13 +85,13 @@ async def save_razorpay_config(request: Request):
         reason="Razorpay TEST MODE credentials saved (secrets stored server-side only; never logged or returned).",
         after_state={"provider": "razorpay", "mode": "TEST", "key_id_masked": f"{key_id[:9]}********"},
     )
-    return {"integration": public_config(await get_integration("razorpay"))}
+    return {"integration": public_config(await get_integration("razorpay", "TEST"))}
 
 
 @router.post("/razorpay/test-connection")
 async def test_connection(request: Request):
     user = await require_owner(request)
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config:
         raise HTTPException(status_code=400, detail="Razorpay integration is not configured.")
     adapter = RazorpayAdapter(config)
@@ -177,13 +184,185 @@ async def resend_diagnostics(request: Request):
     return masked_diagnostics(bool(doc.get("enabled")))
 
 
+# ---------------- Razorpay LIVE mode (Phase 2A: production readiness) ----------------
+# Completely isolated from TEST: separate credentials document (mode="LIVE"),
+# separate webhook secret, separate webhook endpoint, explicit owner activation.
+# Write-only credential storage; masked diagnostics only; every lifecycle step
+# is audited. No real-money recovery execution is implemented in this phase.
+
+LIVE_ACTIVATION_PHRASE = "ACTIVATE LIVE"
+
+
+def _live_public(doc):
+    base = public_config(doc)
+    base["mode"] = "LIVE"
+    base["activated"] = bool(doc and doc.get("live_activated"))
+    base["activated_at"] = doc.get("live_activated_at") if doc else None
+    return base
+
+
+@router.get("/razorpay/live")
+async def razorpay_live_status(request: Request):
+    await require_owner(request)
+    doc = await get_integration("razorpay", "LIVE")
+    settings = await db.settings.find_one({"key": "policy"}, {"_id": 0}) or {}
+    return {
+        "live": _live_public(doc),
+        "configured": bool(doc),
+        "activated": bool(doc and doc.get("live_activated")),
+        "activated_by": doc.get("live_activated_by") if doc else None,
+        "live_actions_enabled": bool(settings.get("live_actions_enabled")),
+        "webhook_endpoint_path": "/api/webhooks/razorpay/live",
+        "phase": "2A readiness — LIVE ingestion, verification, reconciliation and audit only. No real-money recovery execution.",
+    }
+
+
+@router.put("/razorpay/live/config")
+async def save_live_config(request: Request):
+    user = await require_owner(request)
+    body = await request.json()
+    key_id = (body.get("key_id") or "").strip()
+    key_secret = (body.get("key_secret") or "").strip()
+    webhook_secret = (body.get("webhook_secret") or "").strip()
+
+    if key_id.startswith("rzp_test_"):
+        raise HTTPException(status_code=400, detail="LIVE mode rejects rzp_test_… credentials. Test keys belong in the TEST configuration.")
+    if key_id and not key_id.startswith("rzp_live_"):
+        raise HTTPException(status_code=400, detail="LIVE mode requires an rzp_live_… key ID.")
+    if not key_id or not key_secret or not webhook_secret:
+        raise HTTPException(status_code=400, detail="key_id, key_secret and webhook_secret are all required.")
+
+    now = now_iso()
+    await db.integrations.update_one(
+        {"provider": "razorpay", "mode": "LIVE"},
+        {"$set": {
+            "provider": "razorpay", "mode": "LIVE",
+            "key_id": key_id, "key_secret": key_secret, "webhook_secret": webhook_secret,
+            "status": "NOT_CONNECTED", "updated_at": now, "last_error": None,
+            # Credential changes always reset activation — the owner must
+            # explicitly re-confirm before any live event is accepted again.
+            "live_activated": False, "live_activated_at": None, "live_activated_by": None,
+        }, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    await write_audit(
+        actor=user["email"], event_type="LIVE_CREDENTIALS_UPDATED",
+        reason="Razorpay LIVE credentials and webhook secret updated (write-only). Activation state was RESET — the owner must explicitly re-activate LIVE mode before any live event is accepted.",
+        after_state={"provider": "razorpay", "mode": "LIVE", "key_id_prefix": key_id[:9], "webhook_secret_present": True, "live_activated": False},
+    )
+    return {"saved": True, "mode": "LIVE", "live_activated": False}
+
+
+@router.post("/razorpay/live/activate")
+async def activate_live(request: Request):
+    user = await require_owner(request)
+    body = await request.json()
+    if (body.get("confirmation") or "").strip() != LIVE_ACTIVATION_PHRASE:
+        raise HTTPException(status_code=400, detail=f'Type "{LIVE_ACTIVATION_PHRASE}" exactly to confirm activation.')
+    doc = await get_integration("razorpay", "LIVE")
+    if not doc or not doc.get("key_id") or not doc.get("key_secret") or not doc.get("webhook_secret"):
+        raise HTTPException(status_code=400, detail="Save LIVE credentials and webhook secret before activation.")
+    if doc.get("live_activated"):
+        return {"activated": True, "already": True}
+    now = now_iso()
+    await db.integrations.update_one(
+        {"provider": "razorpay", "mode": "LIVE"},
+        {"$set": {"live_activated": True, "live_activated_at": now, "live_activated_by": user["email"]}},
+    )
+    await write_audit(
+        actor=user["email"], event_type="LIVE_MODE_ACTIVATED",
+        reason="PRODUCTION WARNING acknowledged: owner explicitly activated Razorpay LIVE mode. Live webhooks are now accepted and processed (ingestion, verification, reconciliation, audit). No real-money recovery execution is enabled in this phase.",
+        after_state={"mode": "LIVE", "live_activated": True, "webhook_endpoint_path": "/api/webhooks/razorpay/live"},
+    )
+    return {"activated": True, "live_activated_at": now}
+
+
+@router.post("/razorpay/live/deactivate")
+async def deactivate_live(request: Request):
+    user = await require_owner(request)
+    doc = await get_integration("razorpay", "LIVE")
+    if not doc:
+        raise HTTPException(status_code=400, detail="Razorpay LIVE mode is not configured.")
+    await db.integrations.update_one({"provider": "razorpay", "mode": "LIVE"}, {"$set": {"live_activated": False}})
+    await write_audit(
+        actor=user["email"], event_type="LIVE_MODE_DEACTIVATED",
+        reason="Owner deactivated LIVE mode. The live webhook endpoint now rejects events; credentials remain stored (write-only).",
+    )
+    return {"activated": False}
+
+
+@router.post("/razorpay/live/test-connection")
+async def live_test_connection(request: Request):
+    """Read-only genuine API check (GET /orders?count=1). CONNECTED is reported
+    ONLY after a genuine authenticated Razorpay response — never simulated."""
+    user = await require_owner(request)
+    config = await get_integration("razorpay", "LIVE")
+    if not config:
+        raise HTTPException(status_code=400, detail="Razorpay LIVE mode is not configured.")
+    adapter = RazorpayAdapter(config)
+    now = now_iso()
+    try:
+        result = await asyncio.to_thread(adapter.test_connection)
+    except IntegrationError as exc:
+        await db.integrations.update_one({"provider": "razorpay", "mode": "LIVE"},
+                                         {"$set": {"status": "ERROR", "last_error": str(exc), "last_error_at": now}})
+        await write_audit(actor=user["email"], event_type="LIVE_CONNECTION_TEST_FAILED",
+                          reason=f"LIVE connection test failed: {exc}")
+        return {"status": "ERROR", "detail": str(exc)}
+    await db.integrations.update_one({"provider": "razorpay", "mode": "LIVE"},
+                                     {"$set": {"status": "CONNECTED", "last_connected_at": now, "last_error": None}})
+    await write_audit(
+        actor=user["email"], event_type="LIVE_CONNECTION_TEST_PASSED",
+        reason=f"LIVE connection verified with a genuine authenticated Razorpay response (orders visible: {result.get('orders_visible')}). Read-only check; no transaction was created.",
+    )
+    return {"status": "CONNECTED", "detail": result}
+
+
+@router.get("/razorpay/live/diagnostics")
+async def live_diagnostics(request: Request):
+    """Masked LIVE diagnostics — never the key_secret or webhook_secret."""
+    await require_owner(request)
+    config = await get_integration("razorpay", "LIVE")
+    if not config:
+        raise HTTPException(status_code=400, detail="Razorpay LIVE mode is not configured.")
+    key_id = (config.get("key_id") or "").strip()
+    key_secret = (config.get("key_secret") or "").strip()
+    return {
+        "provider": "razorpay", "mode": "LIVE",
+        "status": config.get("status"),
+        "activated": bool(config.get("live_activated")),
+        "key_id_prefix": key_id[:9] if key_id else None,
+        "key_id_length": len(key_id),
+        "key_id_is_live": key_id.startswith("rzp_live_"),
+        "key_secret_present": bool(key_secret),
+        "key_secret_length": len(key_secret),
+        "credential_source": "integration_store",
+        "endpoint": "https://api.razorpay.com/v1",
+        "auth_method": "basic",
+        "webhook_secret_present": bool(config.get("webhook_secret")),
+        "webhook_endpoint_path": "/api/webhooks/razorpay/live",
+        "last_error": config.get("last_error"),
+    }
+
+
+@router.delete("/razorpay/live")
+async def delete_live(request: Request):
+    user = await require_owner(request)
+    await db.integrations.delete_one({"provider": "razorpay", "mode": "LIVE"})
+    await write_audit(
+        actor=user["email"], event_type="LIVE_CREDENTIALS_REMOVED",
+        reason="Razorpay LIVE configuration and credentials were deleted. Stored secrets were never readable and are now destroyed.",
+    )
+    return {"deleted": True}
+
+
 @router.get("/razorpay/diagnostics")
 async def razorpay_diagnostics(request: Request):
     """Owner-only safe diagnostic view of the stored Razorpay credential state.
     Returns masked metadata ONLY — never the raw key_secret, webhook_secret,
     or the Authorization header."""
     await require_owner(request)
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config:
         raise HTTPException(status_code=400, detail="Razorpay integration is not configured.")
     key_id = (config.get("key_id") or "").strip()
@@ -212,7 +391,7 @@ async def create_test_checkout_order(request: Request):
     returned in full because it is public by design (embedded in every
     checkout page); key_secret never leaves the server."""
     user = await require_owner(request)
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config:
         raise HTTPException(status_code=400, detail="Razorpay integration is not configured.")
     body = await request.json()
@@ -258,7 +437,7 @@ async def disconnect_razorpay(request: Request):
 @router.get("/razorpay/health")
 async def integration_health(request: Request):
     await get_current_user(request)
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     base = {"provider": "razorpay"}
     total = await db.provider_events.count_documents(base)
     processed = await db.provider_events.count_documents({**base, "processing_status": "PROCESSED"})
@@ -305,7 +484,7 @@ async def verification_sweep(request: Request):
     open_cases = await db.recovery_cases.find({"status": {"$in": OPEN_CASE_STATUSES}}, {"_id": 0}).to_list(2000)
     results = {"checked": 0, "verified_recovered": 0, "closed_natural": 0, "not_recovered": 0, "pending": 0, "provider_reconciled": 0, "provider_errors": 0, "already_closed": 0}
 
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     adapter = RazorpayAdapter(config) if config and config.get("status") == "CONNECTED" else None
 
     for case in open_cases:
@@ -389,7 +568,7 @@ async def run_test_lab(test_name: str, request: Request):
     """Developer test lab. Every scenario delivers genuinely-signed Razorpay-
     format payloads through the REAL webhook endpoint — same code path."""
     await require_owner(request)
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config or not config.get("webhook_secret"):
         raise HTTPException(status_code=400, detail="Configure Razorpay TEST MODE (including the webhook secret) before using the test lab.")
     secret = config["webhook_secret"]

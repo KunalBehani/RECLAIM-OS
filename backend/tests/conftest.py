@@ -35,6 +35,10 @@ def razorpay_integration_guard():
     ]
     with FileLock("/tmp/reclaim_razorpay_integration_test.lock"):
         saved = mdb.integrations.find_one({"provider": "razorpay"})
+        # Snapshot the LIVE-mode doc and policy settings too — live tests mutate
+        # both, and real production state must survive the suite.
+        saved_live = mdb.integrations.find_one({"provider": "razorpay", "mode": "LIVE"})
+        saved_settings = mdb.settings.find_one({"key": "policy"})
         # The notification channel must be DISABLED during guarded modules —
         # otherwise ambient enabled state would make executions REAL and leak
         # genuine sends into unrelated tests. Restored afterwards.
@@ -52,6 +56,14 @@ def razorpay_integration_guard():
         else:
             saved_resend.pop("_id", None)
             mdb.integrations.replace_one({"provider": "resend"}, saved_resend, upsert=True)
+        if saved_live is None:
+            mdb.integrations.delete_many({"provider": "razorpay", "mode": "LIVE"})
+        else:
+            saved_live.pop("_id", None)
+            mdb.integrations.replace_one({"provider": "razorpay", "mode": "LIVE"}, saved_live, upsert=True)
+        if saved_settings is not None:
+            saved_settings.pop("_id", None)
+            mdb.settings.replace_one({"key": "policy"}, saved_settings, upsert=True)
         if saved is None:
             mdb.integrations.delete_one({"provider": "razorpay"})
         else:

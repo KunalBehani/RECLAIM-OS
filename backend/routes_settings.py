@@ -14,6 +14,7 @@ EDITABLE_KEYS = {
     "approval_threshold_amount": (int, float),
     "confidence_threshold": (int, float),
     "max_total_cost_per_case": (int, float),
+    "live_actions_enabled": bool,
 }
 
 

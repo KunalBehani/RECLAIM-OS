@@ -35,22 +35,43 @@ async def execute_action(
         )
         return {"action": existing, "duplicate": True}
 
+    # Phase 2A live-safety gates — enforced before EVERY action on a LIVE case.
+    # Ingestion, analysis and policy evaluation still run; only execution is gated.
+    case = await db.recovery_cases.find_one({"case_id": case_id}, {"_id": 0})
+    if case and case.get("source") == "RAZORPAY_LIVE":
+        live_settings = await db.settings.find_one({"key": "policy"}, {"_id": 0}) or {}
+        if live_settings.get("emergency_stop"):
+            await write_audit(
+                case_id=case_id, actor=actor, event_type="LIVE_ACTION_BLOCKED",
+                reason=f"LIVE action {action_type} blocked: the global emergency stop is enabled. Kill-switch rules are enforced before every LIVE action.",
+                after_state={"action_type": action_type, "blocked": "EMERGENCY_STOP"},
+            )
+            return {"action": None, "duplicate": False, "blocked": "EMERGENCY_STOP"}
+        if not live_settings.get("live_actions_enabled"):
+            await write_audit(
+                case_id=case_id, actor=actor, event_type="LIVE_ACTION_BLOCKED",
+                reason=(
+                    f"LIVE action {action_type} blocked: LIVE actions are disabled by default and require explicit owner enablement "
+                    "(live_actions_enabled). Phase 2A implements no automatic real-money recovery execution."
+                ),
+                after_state={"action_type": action_type, "blocked": "LIVE_ACTIONS_DISABLED"},
+            )
+            return {"action": None, "duplicate": False, "blocked": "LIVE_ACTIONS_DISABLED"}
+
     spec = ACTION_CATALOG[action_type]
     now = now_iso()
 
     # Phase 1.5: genuine customer-facing execution for provider-sourced cases
     # when the notification channel is configured. Everything else keeps the
     # existing SIMULATED adapter behavior unchanged.
-    if action_type == "SEND_RECOVERY_LINK":
-        case = await db.recovery_cases.find_one({"case_id": case_id}, {"_id": 0})
-        if case and case.get("source") in ("RAZORPAY_TEST", "RAZORPAY_LIVE"):
-            recipient = await _customer_email(case)
-            resend_cfg = await db.integrations.find_one({"provider": "resend"}, {"_id": 0})
-            if recipient and resend_cfg and resend_cfg.get("enabled"):
-                return await _execute_real_notification(
-                    case, spec, idempotency_key, actor, expected_incremental_value,
-                    estimated_cost, policy_result, approval_status, recipient, now,
-                )
+    if action_type == "SEND_RECOVERY_LINK" and case and case.get("source") in ("RAZORPAY_TEST", "RAZORPAY_LIVE"):
+        recipient = await _customer_email(case)
+        resend_cfg = await db.integrations.find_one({"provider": "resend"}, {"_id": 0})
+        if recipient and resend_cfg and resend_cfg.get("enabled"):
+            return await _execute_real_notification(
+                case, spec, idempotency_key, actor, expected_incremental_value,
+                estimated_cost, policy_result, approval_status, recipient, now,
+            )
 
     doc = {
         "action_id": f"act_{uuid.uuid4().hex[:12]}",

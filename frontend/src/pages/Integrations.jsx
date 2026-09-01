@@ -68,6 +68,48 @@ export default function Integrations() {
     }
   };
 
+  const [live, setLive] = useState(null);
+  const [liveForm, setLiveForm] = useState({ key_id: "", key_secret: "", webhook_secret: "" });
+  const [liveConfirm, setLiveConfirm] = useState("");
+  const [liveBusy, setLiveBusy] = useState(false);
+
+  const loadLive = useCallback(() => {
+    api.get("/integrations/razorpay/live").then((res) => setLive(res.data)).catch(() => {});
+  }, []);
+
+  const liveCall = async (fn, okMsg) => {
+    setLiveBusy(true);
+    try {
+      const res = await fn();
+      if (res.data?.status === "ERROR") toast.error(res.data.detail || "LIVE check failed");
+      else toast.success(okMsg);
+      loadLive();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "LIVE operation failed");
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+
+  const saveLiveConfig = async () => {
+    setLiveBusy(true);
+    try {
+      await api.put("/integrations/razorpay/live/config", liveForm);
+      // Write-only contract extends to the client: never retain secrets in DOM/state after save.
+      setLiveForm({ key_id: "", key_secret: "", webhook_secret: "" });
+      setLiveConfirm("");
+      toast.success("LIVE credentials saved (write-only). Activation reset — re-confirm to activate.");
+      loadLive();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "LIVE operation failed");
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+  const testLiveConnection = () => liveCall(() => api.post("/integrations/razorpay/live/test-connection"), "LIVE connection CONNECTED (genuine provider response)");
+  const activateLive = () => liveCall(() => api.post("/integrations/razorpay/live/activate", { confirmation: liveConfirm }), "LIVE mode ACTIVATED — live webhooks are now accepted");
+  const deactivateLive = () => liveCall(() => api.post("/integrations/razorpay/live/deactivate"), "LIVE mode deactivated");
+
   const load = useCallback(() => {
     api.get("/integrations").then((res) => {
       setConfig(res.data.integrations[0]);
@@ -76,7 +118,8 @@ export default function Integrations() {
     }).catch(() => {});
     api.get("/integrations/razorpay/health").then((res) => setHealth(res.data)).catch(() => {});
     loadResend();
-  }, [loadResend]);
+    loadLive();
+  }, [loadResend, loadLive]);
   useEffect(() => { load(); }, [load]);
 
   const save = async () => {
@@ -329,6 +372,76 @@ export default function Integrations() {
             <Copy className="h-3.5 w-3.5" /> Copy endpoint
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border-2 border-amber-400 bg-amber-50/40 p-6" data-testid="live-section">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-heading text-lg font-medium text-slate-900">Razorpay LIVE — Production Mode</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              Phase 2A readiness: completely isolated credentials, webhook secret and endpoint
+              (<span className="font-mono">/api/webhooks/razorpay/live</span>). Ingestion, verification,
+              reconciliation and audit only — <strong>no real-money recovery execution</strong>.
+            </p>
+          </div>
+          <StatusBadge value={live?.activated ? "ACTIVE" : live?.configured ? (live?.live?.status || "NOT_CONNECTED") : "NOT_CONFIGURED"} />
+        </div>
+
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-100/70 p-3 text-xs font-medium text-amber-900" data-testid="live-warning">
+          PRODUCTION WARNING — LIVE mode processes real-money payment events. LIVE actions are disabled by default
+          {live ? ` (currently: ${live.live_actions_enabled ? "ENABLED" : "disabled"})` : ""}.
+          Credentials are write-only and never readable back. Activation requires typing the confirmation phrase.
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <input data-testid="live-key-id-input" type="text" placeholder="rzp_live_…" value={liveForm.key_id}
+            onChange={(e) => setLiveForm({ ...liveForm, key_id: e.target.value })}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none" />
+          <input data-testid="live-key-secret-input" type="password" placeholder="Key Secret (write-only)" value={liveForm.key_secret}
+            onChange={(e) => setLiveForm({ ...liveForm, key_secret: e.target.value })}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none" />
+          <input data-testid="live-webhook-secret-input" type="password" placeholder="Live Webhook Secret (write-only)" value={liveForm.webhook_secret}
+            onChange={(e) => setLiveForm({ ...liveForm, webhook_secret: e.target.value })}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none" />
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button data-testid="live-save-btn" onClick={saveLiveConfig} disabled={liveBusy}
+            className="rounded-lg bg-[#072654] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#0a3168] disabled:opacity-40">
+            Save LIVE credentials
+          </button>
+          <button data-testid="live-test-btn" onClick={testLiveConnection} disabled={liveBusy || !live?.configured}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40">
+            Test LIVE connection (read-only)
+          </button>
+          {live?.configured && !live?.activated && (
+            <div className="flex items-center gap-2" data-testid="live-activation-box">
+              <input data-testid="live-confirm-input" type="text" placeholder='Type "ACTIVATE LIVE"' value={liveConfirm}
+                onChange={(e) => setLiveConfirm(e.target.value)}
+                className="w-44 rounded-lg border border-amber-400 bg-white px-3 py-2 font-mono text-xs outline-none" />
+              <button data-testid="live-activate-btn" onClick={activateLive} disabled={liveBusy || liveConfirm !== "ACTIVATE LIVE"}
+                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-40">
+                Activate LIVE
+              </button>
+            </div>
+          )}
+          {live?.activated && (
+            <button data-testid="live-deactivate-btn" onClick={deactivateLive} disabled={liveBusy}
+              className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-40">
+              Deactivate LIVE
+            </button>
+          )}
+        </div>
+
+        {live?.activated && (
+          <p className="mt-3 text-xs text-emerald-700" data-testid="live-active-note">
+            LIVE mode active (by {live.activated_by}). Live webhooks are accepted at <span className="font-mono">{live.webhook_endpoint_path}</span>.
+            Register that URL in your Razorpay dashboard (Live Mode) with the live webhook secret.
+          </p>
+        )}
+        {live?.live?.last_error && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700" data-testid="live-error">{live.live.last_error}</div>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="resend-section">

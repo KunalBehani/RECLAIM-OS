@@ -137,7 +137,7 @@ async def razorpay_webhook(request: Request):
     if len(raw) > MAX_WEBHOOK_BODY:
         raise HTTPException(status_code=413, detail="Payload too large.")
 
-    config = await get_integration("razorpay")
+    config = await get_integration("razorpay", "TEST")
     if not config or not config.get("webhook_secret"):
         raise HTTPException(status_code=503, detail="Razorpay integration is not configured. Save Test Mode credentials first.")
 
@@ -252,9 +252,17 @@ async def process_provider_event(payload: dict, provider_event_id: str, config: 
             {"$set": {"processing_status": "PROCESSED", "processed_at": now_iso(), "result": result.get("result")}},
         )
         await db.integrations.update_one(
-            {"provider": "razorpay"},
+            {"provider": "razorpay", "mode": mode},
             {"$set": {"last_successful_event_at": now_iso()}},
         )
+        if mode == "LIVE":
+            await write_audit(
+                actor=actor,
+                event_type="LIVE_EVENT_PROCESSED",
+                reason=f"LIVE Razorpay event {payload.get('event')} processed (order {order_ref}). Ingestion, verification and reconciliation only — no LIVE action executes unless explicitly enabled by the owner.",
+                after_state={"provider_event_id": provider_event_id, "result": result.get("result"), "mode": "LIVE"},
+                related={"provider_event_id": provider_event_id},
+            )
         return {"status": "processed", "provider_event_id": provider_event_id, "simulated": False, "mode": mode, "result": result}
     except Exception as exc:
         await db.provider_events.update_one(
@@ -262,10 +270,57 @@ async def process_provider_event(payload: dict, provider_event_id: str, config: 
             {"$set": {"processing_status": "FAILED", "error_code": "PROCESSING_ERROR", "error_message": str(exc)[:300]}},
         )
         await db.integrations.update_one(
-            {"provider": "razorpay"},
+            {"provider": "razorpay", "mode": mode},
             {"$set": {"last_error_at": now_iso(), "last_error": "Event processing failed (see event record)"}},
         )
         raise HTTPException(status_code=500, detail="Event accepted but processing failed; it is recorded and safe to retry.")
+
+
+@router.post("/webhooks/razorpay/live")
+async def razorpay_live_webhook(request: Request):
+    """Production-mode Razorpay webhook — completely isolated from TEST mode:
+    its own stored credentials document, its own webhook secret, and an explicit
+    owner activation gate. Same security order as TEST: size limit -> configured
+    secret + activation check -> RAW-body HMAC-SHA256 verification (constant
+    time) -> JSON parse -> event-id idempotency -> normalize -> shared engine.
+    No secret is ever logged."""
+    raw = await request.body()
+    if len(raw) > MAX_WEBHOOK_BODY:
+        raise HTTPException(status_code=413, detail="Payload too large.")
+
+    config = await get_integration("razorpay", "LIVE")
+    if not config or not config.get("webhook_secret"):
+        raise HTTPException(status_code=503, detail="Razorpay LIVE mode is not configured.")
+    if not config.get("live_activated"):
+        raise HTTPException(status_code=403, detail="LIVE mode is configured but not activated. Explicit owner activation is required before live events are accepted.")
+
+    signature = request.headers.get("X-Razorpay-Signature")
+    provider_event_id = request.headers.get("x-razorpay-event-id")
+
+    if not RazorpayAdapter.verify_signature(raw, signature, config["webhook_secret"]):
+        await db.security_events.insert_one({
+            "type": "INVALID_SIGNATURE",
+            "path": "/api/webhooks/razorpay/live",
+            "ip": request.client.host if request.client else None,
+            "received_at": now_iso(),
+        })
+        await write_audit(
+            actor="webhook:razorpay-live",
+            event_type="LIVE_WEBHOOK_SIGNATURE_REJECTED",
+            reason="LIVE Razorpay webhook signature verification failed. Event rejected; no state changed; security event logged.",
+            related={"provider_event_id": provider_event_id},
+        )
+        raise HTTPException(status_code=401, detail="Invalid webhook signature.")
+
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed JSON payload.")
+
+    if not provider_event_id:
+        provider_event_id = f"noeid_{hashlib.sha256(raw).hexdigest()[:20]}"
+
+    return await process_provider_event(payload, provider_event_id, config, actor="webhook:razorpay-live")
 
 
 @router.get("/webhooks/events")

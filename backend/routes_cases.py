@@ -268,6 +268,9 @@ async def manual_execute(case_id: str, request: Request):
         idempotency_key=f"{case_id}:{action_type}:{exec_count + 1}",
         actor=user["email"], policy_result=policy_result, approval_status="MANUAL_TRIGGER",
     )
+    if res.get("blocked"):
+        return {"executed": False, "blocked": res["blocked"], "policy_result": policy_result,
+                "note": "LIVE action blocked by live-safety gates (emergency stop / LIVE actions disabled). Ingestion and verification are unaffected."}
     return {"executed": not res["duplicate"], "duplicate": res["duplicate"], "action": res["action"], "policy_result": policy_result}
 
 

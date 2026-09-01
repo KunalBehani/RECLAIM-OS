@@ -113,6 +113,17 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 
 - **Final full suite: 222 passed, 0 failed** (471s) — includes 10 notification tests + 12 testing-agent probes (probe module now under the guard lock).
 
+## Implemented (2026-09-01, Phase 2A — LIVE-mode readiness, no real-money execution)
+- **Mode isolation**: `integrations_store.get_integration(provider, mode)` — TEST and LIVE are completely separate credential documents; legacy docs treated as TEST; all existing call sites explicitly TEST.
+- **LIVE endpoints** (`routes_integrations.py`): status, write-only config (rejects rzp_test_*; requires rzp_live_*; credential change resets activation), activation with exact phrase "ACTIVATE LIVE", deactivate, read-only genuine connection test (CONNECTED only on real Razorpay 200), masked diagnostics, delete. list_integrations live_mode stub now real.
+- **LIVE webhook** `POST /api/webhooks/razorpay/live`: own secret, activation gate (403), raw-body HMAC-SHA256 + constant-time compare, idempotency + duplicate counters, shared normalization/engine (source RAZORPAY_LIVE), security event log + LIVE_WEBHOOK_SIGNATURE_REJECTED/LIVE_EVENT_PROCESSED audits.
+- **Live-safety gates** (`execution.py`): before EVERY LIVE-case action — emergency_stop → LIVE_ACTION_BLOCKED(EMERGENCY_STOP); live_actions_enabled=false (default, new editable setting) → LIVE_ACTION_BLOCKED(LIVE_ACTIONS_DISABLED). Pipeline/manual callers handle blocked results gracefully. Attribution rules untouched; simulated never attributable on LIVE.
+- **Audit**: LIVE_CREDENTIALS_UPDATED / LIVE_MODE_ACTIVATED / LIVE_MODE_DEACTIVATED / LIVE_CONNECTION_TEST_PASSED/FAILED / LIVE_EVENT_PROCESSED / LIVE_ACTION_BLOCKED / LIVE_CREDENTIALS_REMOVED.
+- **UI**: Integrations LIVE section — amber production warning, write-only inputs, read-only connection test, type-to-confirm activation, deactivate; NOT_CONFIGURED/NOT_CONNECTED/CONNECTED/ERROR/ACTIVE states.
+- **Tests**: `tests/test_live_mode.py` 12/12 (isolation, rejection, masking, activation gate, webhook verification, idempotency, source+metric segregation, out-of-order precedence, action gates, cross-contamination, honest connection ERROR, audit trail, deletion). Guard fixture now also snapshots/restores LIVE doc + policy settings. Full regression: **233 passed, 1 skipped**.
+- **External prerequisite**: genuine LIVE connection (CONNECTED) requires the user's real Razorpay LIVE credentials — not faked, reported honestly.
+- Testing agent iteration_10: **54/54 independent checks passed** (mode isolation, rejection both ways, masking, activation gate + reset-on-resave, webhook security + idempotency, cross-contamination, action gates, honest ERROR connection test, audit trail, deletion, frontend UI). Fixed its one LOW finding: LIVE credential form fields are cleared from client state/DOM immediately after save (write-only contract client-side) — self-tested via browser flow (fields verified empty post-save). Environment left pristine: dummy LIVE config deleted, LIVE_* audit rows cleaned, TEST CONNECTED, resend CONNECTED.
+
 ## Prioritized Backlog
 ### P0 (remaining)
 - None (Razorpay 401 diagnosed to external cause; awaiting valid user credentials to complete CONNECTED verification)

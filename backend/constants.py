@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "confidence_threshold": 0.55,
     "max_total_cost_per_case": 500,
     "do_not_contact_customers": [],
+    "live_actions_enabled": False,
 }
 
 

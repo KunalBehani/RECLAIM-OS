@@ -1,0 +1,33 @@
+{
+  "summary": "Independent verification of RECLAIM OS Phase 2A LIVE-mode readiness (no pytest used). Wrote a standalone script (/app/tests/live_mode_independent.py) that exercises all LIVE semantics against the PUBLIC preview URL with the owner session token, asserting via Mongo reads: 54 checks, 54 effective passes (1 initial failure was my own script bug reading /api/settings response shape — fixed; real state was correct). Verified mode isolation (separate razorpay TEST/LIVE docs), credential rejection both ways (rzp_test_ on LIVE -> 400, non-prefixed -> 400, rzp_live_ on TEST -> 400), masked write-only diagnostics (no key_secret/webhook_secret in any response; anonymous GET/PUT/POST/DELETE on all 6 live endpoints -> 401), activation gate (webhook 403 before activation, wrong phrase 400, 'ACTIVATE LIVE' 200, credential re-save RESETS activation), LIVE webhook security (bad signature -> 401 + security_events row; genuine raw-body HMAC -> processed mode=LIVE, provider_event source=LIVE/signature_verified=true; exact replay -> duplicate:true with duplicate_deliveries=1), cross-contamination (real TEST webhook secret signature fails on LIVE endpoint 401; LIVE secret fails on TEST endpoint 401), case source RAZORPAY_LIVE, LIVE action gates (emergency_stop -> policy STOP/no execution; default live_actions_enabled=false -> blocked:'LIVE_ACTIONS_DISABLED' + LIVE_ACTION_BLOCKED audit; after enabling -> executed with simulated=true and no attribution), honest connection test (status ERROR with real Razorpay 401 detail, diagnostics status ERROR, LIVE_CONNECTION_TEST_FAILED audit), full LIVE_* audit trail, DELETE live config (503 on live webhook afterwards). Frontend /integrations verified with Playwright: live-section, live-warning production text, write-only password inputs, activation box only when configured-and-not-activated, activate button disabled until exact phrase, activation succeeds, read-only LIVE connection test surfaces the honest 401 error in UI, no secrets rendered, TEST card still CONNECTED. All artifacts cleaned up; TEST razorpay doc (real creds, CONNECTED) and resend doc (enabled) byte-identical/untouched; settings reset to emergency_stop=false, live_actions_enabled=false.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Integrations LIVE section", "issue": "LIVE credential inputs are NOT cleared after a successful save — key_id/key_secret/webhook_secret values stay in React state and in the DOM (as password fields). Backend is correctly write-only, but the client should reset the form after save so live secrets aren't retained in client memory/DOM.", "selector": "[data-testid=\"live-key-secret-input\"], [data-testid=\"live-webhook-secret-input\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Integrations LIVE section", "issues": ["Amber/red warning + error blocks have good contrast; no layout/spacing defects found at 1920x1080. Status badge correctly flips NOT CONNECTED -> ACTIVE."]}
+    ]
+  },
+  "test_report_links": ["/app/tests/live_mode_independent.py"],
+  "action_items": [
+    "Optional (LOW): clear the LIVE credential form fields after a successful save so secrets are not retained client-side."
+  ],
+  "critical_code_review_comments": [
+    "routes_integrations.py is 638 lines and frontend/src/pages/Integrations.jsx is 591 lines — both approaching the 700-line split threshold; consider extracting the LIVE-mode block / LiveSection component before Phase 2B grows them further.",
+    "Security order in /api/webhooks/razorpay/live is correct (size limit -> configured+activated -> raw-body constant-time HMAC -> parse -> idempotency); no secrets logged. No changes needed.",
+    "execution.py enforces both gates (emergency_stop, live_actions_enabled) before every LIVE action and writes LIVE_ACTION_BLOCKED audits — verified end-to-end, no bypass found via the manual execute route."
+  ],
+  "updated_files": ["/app/tests/live_mode_independent.py (new, non-pytest independent verification script)"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "seed_data_creation": "Temporary LIVE integration doc with dummy rzp_live_TESTONLY* creds, 2 order_lv* LIVE cases/attempts/provider_events/actions, LIVE_* audit + security events — ALL deleted after testing (verified counts = 0). TEST razorpay and resend docs untouched; policy settings restored.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Owner session token test_session_smoke_1787904424204 (smoke.tester@example.com, role owner) — worked via both Authorization: Bearer header and session_token cookie.",
+  "context_for_next_testing_agent": "Use /app/tests/live_mode_independent.py (python3, non-pytest) for LIVE-mode regression against the public URL; it snapshots the real TEST razorpay doc, asserts it is unchanged, and cleans up everything it creates. Note: GET /api/settings returns the policy object nested under key 'settings'. On page load the app fires one /api/auth/me 401 before the session cookie is applied — expected in automation, not a bug. No genuine LIVE credentials exist, so ERROR (real Razorpay 401) is the correct connection-test outcome.",
+  "rca_of_the_issue": "No product defect found. The single failing check in my first run was a test-script bug (read /api/settings top-level instead of ['settings']); corrected and re-verified via API that emergency_stop=false and live_actions_enabled=false after the gate tests."
+}

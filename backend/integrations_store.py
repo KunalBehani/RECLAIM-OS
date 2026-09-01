@@ -4,8 +4,17 @@ and are NEVER returned by any API response — only masked metadata."""
 from database import db
 
 
-async def get_integration(provider: str = "razorpay"):
-    return await db.integrations.find_one({"provider": provider}, {"_id": 0})
+async def get_integration(provider: str = "razorpay", mode: str | None = None):
+    """Mode-scoped credential retrieval. TEST and LIVE configurations are
+    completely isolated documents; legacy docs without a mode field are
+    treated as TEST. mode=None matches any mode (used for non-payment
+    providers like resend that have no modes)."""
+    if mode is None:
+        return await db.integrations.find_one({"provider": provider}, {"_id": 0})
+    doc = await db.integrations.find_one({"provider": provider, "mode": mode}, {"_id": 0})
+    if doc is None and mode == "TEST":
+        doc = await db.integrations.find_one({"provider": provider, "$or": [{"mode": {"$exists": False}}, {"mode": None}]}, {"_id": 0})
+    return doc
 
 
 def mask_key_id(key_id):
