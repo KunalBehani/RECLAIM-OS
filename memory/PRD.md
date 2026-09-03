@@ -164,3 +164,16 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 1. Build the Evaluation Lab (P1) as the next major feature
 2. Add scheduled verification sweep via .emergent/crons.yml (P1)
 3. Scale hardening: denormalize stage/source fields onto case docs (P1)
+
+
+## Implemented (2026-09-03, Phase 2B closure — genuine E2E TEST demo + attribution race fix)
+- **Genuine E2E TEST demonstration (Req #32) executed on real provider data**: real Razorpay TEST order `order_TXa0ZHoMvOqB6z` (₹500) → genuinely-signed `payment.failed` through the public webhook → case `case_2455f781880b` (OPEN→EVALUATED→ACTION_EXECUTED) → REAL recovery email via Resend (ref 01a06772…) → user paid via the tokenized retry link in Razorpay hosted checkout → genuine provider webhook + signature-verified `/complete` → **VERIFIED_RECOVERED / STRONG / ₹500** (incremental_recovered_amount ₹500). Dashboard reflects it (80 verified recoveries, ₹6,59,700 gross).
+- **Webhook/link race fixed** (`routes_recovery.py`): when the provider webhook closes a case MODERATE before the browser's signature-verified `/complete` arrives, the late direct evidence now upgrades attribution MODERATE→STRONG with an ATTRIBUTION_DECISION audit. Exercised on the real demo case via the live endpoint.
+- **Incremental credit populated** (`detection.py`): VERIFIED_RECOVERED closures now set `incremental_recovered_amount = recovered_amount` (field existed since Phase 2B but was never written); demo case backfilled with a CASE_REATTRIBUTED audit.
+- Tests: test_12 (incremental credit) + test_13 (late-link STRONG upgrade) added to test_phase2b.py. Targeted run 23/23 passed. Full suite 245 passed, 1 skipped, 1 flaky failure (`test_09` — external Emergent email proxy send hiccup under xdist load; verified passing standalone 54s; not a code defect).
+- Final engineering report delivered to user (Phase 2B acceptance criteria complete).
+
+## Next Tasks
+1. Phase 3 (P1): ML Evaluation Lab — precision/recall/F1/calibration, natural-recovery baselines
+2. Phase 4 (P2): LIVE money movement — only after merchant KYC + genuine rzp_live_ credentials (fail-closed by default)
+3. P1 hygiene: lab-case flag so order_LAB* cases stop inflating active-case counters; persist stage membership on case docs

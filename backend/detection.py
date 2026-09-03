@@ -423,6 +423,7 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
                 "outcome": "PARTIALLY_RECOVERED" if partial else "VERIFIED_RECOVERED",
                 "verification_status": "VERIFIED",
                 "recovered_amount": recovered_amount,
+                "incremental_recovered_amount": recovered_amount,
                 "attribution": "SYSTEM_ACTION",
                 "attributed_action": attributed_action,
                 "attribution_strength": strength,

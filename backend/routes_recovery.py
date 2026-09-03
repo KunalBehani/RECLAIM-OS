@@ -98,6 +98,30 @@ async def complete_retry(token: str, body: CompleteBody):
         ),
         after_state={"action_id": action["action_id"], "linked_payment_id": payment_id, "order_id": order_id},
     )
+
+    # Webhook/link race: the provider webhook (source of truth) may close the
+    # case MODERATE seconds before the browser posts this signature-verified
+    # link. Direct evidence arriving late still earns STRONG.
+    if (
+        case.get("status") == "VERIFIED_RECOVERED"
+        and case.get("attribution_strength") == "MODERATE"
+        and (case.get("verification_evidence") or {}).get("success_payment_id") in (None, payment_id)
+    ):
+        await db.recovery_cases.update_one(
+            {"case_id": case["case_id"]},
+            {"$set": {"attribution_strength": "STRONG"}},
+        )
+        await write_audit(
+            case_id=case["case_id"],
+            actor="customer",
+            event_type="ATTRIBUTION_DECISION",
+            reason=(
+                f"Recovery-link payment {payment_id} linked after the case was already closed by the provider webhook. "
+                "Signature-verified same-order link is direct evidence: attribution upgraded MODERATE -> STRONG."
+            ),
+            before_state={"attribution_strength": "MODERATE"},
+            after_state={"attribution_strength": "STRONG", "linked_payment_id": payment_id},
+        )
     return {"linked": True, "duplicate": False, "payment_id": payment_id}
 
 

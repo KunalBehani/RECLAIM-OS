@@ -285,3 +285,61 @@ def test_11_health_observability_fields():
     body = r.json()
     for field in ("recovery_action_failures", "live_action_blocks", "reconciliation_failures", "policy_blocks", "last_sweep"):
         assert field in body, f"missing health field: {field}"
+
+
+
+# ---------- 12. closure credits incremental recovered amount ----------
+def _insert_genuine_action(suf, case_id, ts, token=None):
+    doc = {
+        "action_id": f"act_{suf}", "case_id": case_id, "action_type": "SEND_RECOVERY_LINK",
+        "simulated": False, "executed_time": datetime.fromtimestamp(ts, timezone.utc).isoformat(),
+        "outcome": "PENDING", "created_at": datetime.fromtimestamp(ts, timezone.utc).isoformat(),
+    }
+    if token:
+        doc["recovery_token"] = token
+        doc["expires_at"] = datetime.fromtimestamp(ts + 7 * 86400, timezone.utc).isoformat()
+    mdb.recovery_actions.insert_one(doc)
+    return doc
+
+
+def test_12_closure_sets_incremental_recovered_amount():
+    suf, oid, payf, pays = _ids("p2inc")
+    ts = int(time.time())
+    assert _post(_pay("payment.failed", payf, oid, 50000, ts), f"evt_{suf}f").status_code == 200
+    case = _case(oid)
+    assert case, "case not created"
+    _insert_genuine_action(suf, case["case_id"], ts + 5)
+    assert _post(_pay("payment.captured", pays, oid, 50000, ts + 60), f"evt_{suf}s").status_code == 200
+    case = _case(oid)
+    assert case["status"] == "VERIFIED_RECOVERED", case.get("status")
+    assert case["attribution_strength"] == "MODERATE"
+    assert float(case.get("recovered_amount") or 0) == 500.0
+    assert float(case.get("incremental_recovered_amount") or 0) == 500.0
+    _cleanup(suf)
+
+
+# ---------- 13. webhook/link race: late signature-verified link upgrades MODERATE -> STRONG ----------
+def test_13_late_recovery_link_upgrades_to_strong():
+    suf, oid, payf, pays = _ids("p2upg")
+    token = f"rct_{suf}{uuid.uuid4().hex[:12]}"
+    ts = int(time.time())
+    assert _post(_pay("payment.failed", payf, oid, 50000, ts), f"evt_{suf}f").status_code == 200
+    case = _case(oid)
+    assert case, "case not created"
+    _insert_genuine_action(suf, case["case_id"], ts + 5, token=token)
+    # provider webhook closes the case FIRST (the real-world race)
+    assert _post(_pay("payment.captured", pays, oid, 50000, ts + 60), f"evt_{suf}s").status_code == 200
+    case = _case(oid)
+    assert case["status"] == "VERIFIED_RECOVERED" and case["attribution_strength"] == "MODERATE"
+    # browser's signature-verified completion arrives after closure
+    cfg = mdb.integrations.find_one({"provider": "razorpay", "mode": "TEST"}, {"_id": 0, "key_secret": 1})
+    sig = hmac.new(cfg["key_secret"].encode(), f"{oid}|{pays}".encode(), hashlib.sha256).hexdigest()
+    r = requests.post(f"{LOCAL}/api/recovery/pay/{token}/complete", timeout=60, json={
+        "razorpay_payment_id": pays, "razorpay_order_id": oid, "razorpay_signature": sig})
+    assert r.status_code == 200 and r.json()["linked"] is True, r.text
+    case = _case(oid)
+    assert case["attribution_strength"] == "STRONG", case.get("attribution_strength")
+    upgrade = mdb.audit_events.find_one({"case_id": case["case_id"], "event_type": "ATTRIBUTION_DECISION",
+                                         "after_state.attribution_strength": "STRONG"}, {"_id": 0})
+    assert upgrade, "upgrade audit event missing"
+    _cleanup(suf)
