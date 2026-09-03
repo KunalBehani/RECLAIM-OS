@@ -17,7 +17,7 @@ const STATUS_COLORS = {
   NOT_RECOVERED: "#DC2626", STOPPED: "#475569", INVALID: "#94A3B8",
 };
 
-const EMPTY_FILTERS = { q: "", status: "", outcome: "", policy: "", source: "", stage: "", attributed_action: "", sort: "newest" };
+const EMPTY_FILTERS = { q: "", status: "", outcome: "", policy: "", source: "", stage: "", attributed_action: "", verification: "", attribution: "", sort: "newest" };
 
 const fmtMap = (m) => {
   const entries = Object.entries(m || {});
@@ -373,6 +373,16 @@ export default function Dashboard() {
               <option value="">All sources</option>
               {["LIVE", "TEST_MODE", "IMPORTED", "SIMULATED"].map((s) => <option key={s} value={s}>{labelize(s)}</option>)}
             </select>
+            <select data-testid="case-verification-filter" value={filters.verification} onChange={(e) => setFilters((f) => ({ ...f, verification: e.target.value }))}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 outline-none">
+              <option value="">All verification</option>
+              {["UNVERIFIED", "PENDING", "VERIFIED"].map((s) => <option key={s} value={s}>{labelize(s)}</option>)}
+            </select>
+            <select data-testid="case-attribution-filter" value={filters.attribution} onChange={(e) => setFilters((f) => ({ ...f, attribution: e.target.value }))}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 outline-none">
+              <option value="">All attribution</option>
+              {["STRONG", "MODERATE", "UNCERTAIN", "NONE"].map((s) => <option key={s} value={s}>{labelize(s)}</option>)}
+            </select>
             <select data-testid="case-outcome-filter" value={filters.outcome} onChange={(e) => setFilters((f) => ({ ...f, outcome: e.target.value }))}
               className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 outline-none">
               <option value="">All outcomes</option>
@@ -391,6 +401,8 @@ export default function Dashboard() {
               <option value="oldest">Oldest first</option>
               <option value="amount_desc">Amount ↓ (grouped by currency)</option>
               <option value="amount_asc">Amount ↑ (grouped by currency)</option>
+              <option value="eiv_desc">Highest EIV first</option>
+              <option value="attention">Requires attention</option>
             </select>
           </div>
         </div>

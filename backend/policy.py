@@ -85,10 +85,13 @@ ACTION_CATALOG = {
 CONTROL_ACTIONS = {"WAIT_NO_ACTION", "STOP_RECOVERY", "ESCALATE_HUMAN"}
 
 
-def compute_eiv(amount: float, p_action: float, p_natural: float, cost: float) -> float:
+def compute_eiv(amount: float, p_action: float, p_natural: float, cost: float, risk_penalty: float = 0.0) -> float:
+    """Expected Incremental Value: uplift over the natural-recovery baseline,
+    times the recoverable amount, minus action cost and risk penalty.
+    Natural recovery is never counted as incremental."""
     p_action = max(0.0, min(1.0, p_action))
     p_natural = max(0.0, min(1.0, p_natural))
-    return round(amount * (p_action - p_natural) - cost, 2)
+    return round(amount * (p_action - p_natural) - cost - risk_penalty, 2)
 
 
 def evaluate_policy(case: dict, action_type: str, actions: list, settings: dict, now=None) -> dict:

@@ -2,6 +2,7 @@ import uuid
 
 from audit import write_audit
 from constants import now_iso
+from case_state import assert_transition
 from database import db
 from policy import ACTION_CATALOG
 
@@ -58,6 +59,33 @@ async def execute_action(
             )
             return {"action": None, "duplicate": False, "blocked": "LIVE_ACTIONS_DISABLED"}
 
+    # Phase 2B anti-spam: per-customer daily cap on customer-facing actions
+    # across ALL of that customer's cases (duplicate webhooks must not spam).
+    CUSTOMER_FACING = {"SEND_RECOVERY_LINK", "CUSTOMER_REMINDER"}
+    if case and action_type in CUSTOMER_FACING and case.get("customer_reference"):
+        from datetime import datetime, timedelta, timezone
+        from notifications.base import mask_email
+
+        settings_doc = await db.settings.find_one({"key": "policy"}, {"_id": 0}) or {}
+        cap = int(settings_doc.get("max_customer_actions_per_day", 10))
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        cust_cases = await db.recovery_cases.distinct("case_id", {"customer_reference": case["customer_reference"]})
+        # Only genuine (non-simulated) executions count — simulated actions send
+        # nothing, so they cannot spam a customer.
+        recent = await db.recovery_actions.count_documents({
+            "case_id": {"$in": cust_cases},
+            "action_type": {"$in": list(CUSTOMER_FACING)},
+            "simulated": False,
+            "executed_time": {"$ne": None, "$gte": since},
+        })
+        if recent >= cap:
+            await write_audit(
+                case_id=case_id, actor=actor, event_type="ACTION_BLOCKED",
+                reason=f"Per-customer daily cap reached ({recent}/{cap} customer-facing actions in 24h for {mask_email(case['customer_reference'])}). Anti-spam protection; nothing executed.",
+                after_state={"blocked": "CUSTOMER_RATE_LIMIT", "cap": cap, "recent_24h": recent},
+            )
+            return {"action": None, "duplicate": False, "blocked": "CUSTOMER_RATE_LIMIT"}
+
     spec = ACTION_CATALOG[action_type]
     now = now_iso()
 
@@ -73,6 +101,12 @@ async def execute_action(
                 estimated_cost, policy_result, approval_status, recipient, now,
             )
 
+    # Derive stored EIV from the reproducible inputs so the two can never drift
+    # (manual-execute / human-approve paths don't pass expected_incremental_value).
+    eiv_inputs = next((e.get("eiv_inputs") for e in (case or {}).get("action_evaluations", []) if e.get("action_type") == action_type), None)
+    if eiv_inputs and not expected_incremental_value:
+        expected_incremental_value = eiv_inputs["eiv"]
+
     doc = {
         "action_id": f"act_{uuid.uuid4().hex[:12]}",
         "case_id": case_id,
@@ -86,6 +120,7 @@ async def execute_action(
         "policy_result": (policy_result or {}).get("decision"),
         "policy_reasons": (policy_result or {}).get("reasons", []),
         "expected_incremental_value": expected_incremental_value,
+        "eiv_inputs": eiv_inputs,
         "estimated_cost": spec["estimated_cost"] if estimated_cost is None else estimated_cost,
         "outcome": "PENDING",
         "idempotency_key": idempotency_key,
@@ -107,6 +142,7 @@ async def execute_action(
         after_state={"action_id": doc["action_id"], "action_type": action_type, "execution_mode": "SIMULATED"},
         policy_rule_reference=(policy_result or {}).get("rule_version"),
     )
+    assert_transition(case["status"], "ACTION_EXECUTED")
     await db.recovery_cases.update_one(
         {"case_id": case_id},
         {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now}},
@@ -155,6 +191,7 @@ async def _execute_real_notification(case, spec, idempotency_key, actor, expecte
         "policy_result": (policy_result or {}).get("decision"),
         "policy_reasons": (policy_result or {}).get("reasons", []),
         "expected_incremental_value": expected_incremental_value,
+        "eiv_inputs": next((e.get("eiv_inputs") for e in case.get("action_evaluations", []) if e.get("action_type") == "SEND_RECOVERY_LINK"), None),
         "estimated_cost": spec["estimated_cost"] if estimated_cost is None else estimated_cost,
         "outcome": "PENDING",
         "idempotency_key": idempotency_key,
@@ -194,6 +231,7 @@ async def _execute_real_notification(case, spec, idempotency_key, actor, expecte
                      "recipient_masked": mask_email(recipient)},
         policy_rule_reference=(policy_result or {}).get("rule_version"),
     )
+    assert_transition(case["status"], "ACTION_EXECUTED")
     await db.recovery_cases.update_one(
         {"case_id": case["case_id"]},
         {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now}},

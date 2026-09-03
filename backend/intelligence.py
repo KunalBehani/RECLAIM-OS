@@ -4,7 +4,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from constants import MODEL_VERSION_HEURISTIC, MODEL_VERSION_LLM, parse_dt
+from constants import MODEL_VERSION_HEURISTIC, MODEL_VERSION_LLM, RULE_VERSION, parse_dt
 from policy import ACTION_CATALOG, compute_eiv
 
 SOFT_DECLINE_CODES = {
@@ -249,6 +249,18 @@ async def analyze_case(case: dict, attempts: list, allow_llm: bool = True) -> di
             "estimated_cost": spec["estimated_cost"],
             "expected_incremental_value": eiv,
             "confidence": confidence,
+            # Reproducible EIV inputs (Phase 2B): every calculation can be replayed.
+            "eiv_inputs": {
+                "recovery_likelihood": p,
+                "natural_recovery_baseline": p_nat,
+                "incremental_probability": round(p - p_nat, 3),
+                "recoverable_amount": amount,
+                "action_cost": spec["estimated_cost"],
+                "risk_penalty": 0.0,
+                "eiv": eiv,
+                "model_version": model_version,
+                "policy_version": RULE_VERSION,
+            },
         })
     evaluations.append({
         "action_type": "WAIT_NO_ACTION",

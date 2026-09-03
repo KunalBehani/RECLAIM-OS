@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from audit import write_audit
 from constants import CLOSED_CASE_STATUSES, OPEN_CASE_STATUSES, now_iso, parse_dt
+from case_state import assert_transition
 from database import db, get_settings
 from execution import execute_action
 from intelligence import analyze_case
@@ -307,6 +308,18 @@ async def reevaluate_order(order_key: str, trigger, actor="system", allow_llm=Tr
         "simulated": latest_fail.get("simulated", False),
         "recovered_amount": 0.0,
         "attribution_strength": None,
+        # Phase 2B canonical case model additions
+        "merchant_id": "default_merchant",
+        "provider_mode": latest_fail.get("source_mode") or ("LIVE" if latest_fail.get("source") == "RAZORPAY_LIVE" else "TEST"),
+        "provider_order_id": latest_fail.get("order_id"),
+        "provider_payment_id": latest_fail.get("payment_id"),
+        "payment_method": latest_fail.get("payment_method"),
+        "failure_code": latest_fail.get("failure_code"),
+        "failure_reason": latest_fail.get("failure_reason"),
+        "first_failed_at": latest_fail.get("timestamp"),
+        "latest_event_at": latest_fail.get("timestamp"),
+        "incremental_recovered_amount": 0.0,
+        "natural_recovered_amount": 0.0,
     }
     case_doc["title"] = case_title(case_doc)
     case_doc["why_at_risk"] = why_at_risk(case_doc)
@@ -455,7 +468,16 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
                 )
 
     updates.update({"verification_evidence": evidence, "closed_at": now_iso(), "action_status": "CLOSED"})
+    assert_transition(case["status"], updates["status"])
     await db.recovery_cases.update_one({"case_id": case["case_id"]}, {"$set": updates})
+    await write_audit(
+        case_id=case["case_id"],
+        actor=actor,
+        event_type="ATTRIBUTION_DECISION",
+        reason=f"Attribution for settlement {success_ref}: {updates.get('attribution_strength') or 'NONE'} ({updates['status']}). Rule: genuine executed customer-facing action + (linked payment => STRONG, timing => MODERATE), otherwise natural/uncertain. Simulated actions never attributable on provider cases.",
+        after_state={"attribution_strength": updates.get("attribution_strength"), "attributed_action": updates.get("attributed_action"), "recovered_amount": updates.get("recovered_amount")},
+        related=evidence,
+    )
     await write_audit(
         case_id=case["case_id"],
         actor=actor,
@@ -489,6 +511,7 @@ async def verify_case(case_id: str, actor="verification") -> dict:
     created = parse_dt(case["created_at"])
     window = timedelta(days=float(settings.get("recovery_window_days", 14)))
     if created and datetime.now(timezone.utc) > created + window:
+        assert_transition(case["status"], "NOT_RECOVERED")
         await db.recovery_cases.update_one(
             {"case_id": case_id},
             {"$set": {"status": "NOT_RECOVERED", "outcome": "NOT_RECOVERED", "verification_status": "VERIFIED", "closed_at": now_iso(), "action_status": "CLOSED"}},
@@ -519,9 +542,12 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
         return {"error": "case_not_found"}
     attempts = await db.payment_attempts.find(_order_query(case["order_key"]), {"_id": 0}).sort("timestamp", 1).to_list(1000)
     settings = await get_settings()
+    await write_audit(case_id=case_id, actor=actor, event_type="AI_ANALYSIS_STARTED",
+                      reason="Recovery analysis started (features -> model/heuristic -> structured output).")
     analysis = await analyze_case(case, attempts, allow_llm=allow_llm)
 
     new_status = "EVALUATED" if case["status"] == "OPEN" else case["status"]
+    assert_transition(case["status"], new_status)
     await db.recovery_cases.update_one(
         {"case_id": case_id},
         {"$set": {
@@ -585,6 +611,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
     outcome = {"recommended_action": rec, "policy_decision": policy_result["decision"], "executed": False}
     if rec in ("WAIT_NO_ACTION", "ESCALATE_HUMAN", "STOP_RECOVERY"):
         if rec == "ESCALATE_HUMAN":
+            assert_transition(case["status"], "APPROVAL_PENDING")
             await db.recovery_cases.update_one({"case_id": case_id}, {"$set": {"status": "APPROVAL_PENDING", "action_status": "AWAITING_HUMAN"}})
             await write_audit(case_id=case_id, actor=actor, event_type="ESCALATED_TO_HUMAN", reason="Analysis recommends human review.")
         return outcome
@@ -619,6 +646,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
     elif policy_result["decision"] == "ALLOW":
         outcome["note"] = "auto_execute disabled; action awaiting manual execution."
     elif policy_result["decision"] == "APPROVAL":
+        assert_transition(case["status"], "APPROVAL_PENDING")
         await db.recovery_cases.update_one({"case_id": case_id}, {"$set": {"status": "APPROVAL_PENDING", "action_status": "AWAITING_APPROVAL"}})
         await write_audit(
             case_id=case_id,
@@ -631,6 +659,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
     elif policy_result["decision"] == "BLOCK":
         await db.recovery_cases.update_one({"case_id": case_id}, {"$set": {"action_status": "BLOCKED"}})
     elif policy_result["decision"] == "STOP":
+        assert_transition(case["status"], "STOPPED")
         await db.recovery_cases.update_one(
             {"case_id": case_id},
             {"$set": {"status": "STOPPED", "action_status": "STOPPED", "outcome": "STOPPED", "closed_at": now_iso()}},

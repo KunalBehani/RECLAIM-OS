@@ -217,7 +217,18 @@ async def process_provider_event(payload: dict, provider_event_id: str, config: 
 
     await write_audit(
         actor=actor,
+        event_type="WEBHOOK_SIGNATURE_VERIFIED",
+        reason=f"Raw-body HMAC-SHA256 signature verified for Razorpay event ({payload.get('event')}), constant-time comparison, mode {mode}.",
+        after_state={"provider_event_id": provider_event_id, "mode": mode},
+        related={"provider_event_id": provider_event_id},
+        provider_mode=mode,
+        correlation_id=provider_event_id,
+    )
+    await write_audit(
+        actor=actor,
         event_type="WEBHOOK_RECEIVED",
+        provider_mode=mode,
+        correlation_id=provider_event_id,
         reason=f"Razorpay webhook received and signature verified ({payload.get('event')}).",
         after_state={"provider_event_id": provider_event_id, "event_type": payload.get("event"), "mode": mode},
         related={"provider_event_id": provider_event_id},
@@ -240,9 +251,12 @@ async def process_provider_event(payload: dict, provider_event_id: str, config: 
     await write_audit(
         actor=actor,
         event_type="EVENT_NORMALIZED",
-        reason=f"Razorpay {payload.get('event')} normalized into the internal event model.",
-        after_state={"normalized_event_id": normalized_id, "order_id": order_ref, "kind": normalized["kind"]},
+        reason=f"Provider event normalized into internal {normalized.get('kind')} model ({normalized.get('event_type')}).",
+        after_state={"event_type": normalized.get("event_type"), "kind": normalized["kind"], "mode": mode,
+                     "normalized_event_id": normalized_id, "order_id": order_ref},
         related={"provider_event_id": provider_event_id},
+        provider_mode=mode,
+        correlation_id=provider_event_id,
     )
 
     try:

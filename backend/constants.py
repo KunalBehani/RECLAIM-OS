@@ -34,6 +34,7 @@ DEFAULT_SETTINGS = {
     "max_total_cost_per_case": 500,
     "do_not_contact_customers": [],
     "live_actions_enabled": False,
+    "max_customer_actions_per_day": 10,
 }
 
 

@@ -1,0 +1,8 @@
+crons:
+  - name: nightly-sweep
+    description: "Nightly verification sweep: re-verifies open recovery cases against provider state and reconciles"
+    cron: "0 3 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/verification-sweep"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

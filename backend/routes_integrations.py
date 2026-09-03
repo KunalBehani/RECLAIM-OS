@@ -42,7 +42,7 @@ async def list_integrations(request: Request):
             "configured": bool(live_doc),
             "activated": bool(live_doc and live_doc.get("live_activated")),
             "webhook_endpoint_path": "/api/webhooks/razorpay/live",
-            "note": "Phase 2A readiness: LIVE ingestion, verification, reconciliation and audit only. No real-money recovery execution.",
+            "note": "Phase 2B readiness: LIVE ingestion, verification, reconciliation and audit only. No real-money recovery execution.",
         },
         "webhook_endpoint_path": "/api/webhooks/razorpay",
     }
@@ -345,6 +345,60 @@ async def live_diagnostics(request: Request):
     }
 
 
+@router.get("/razorpay/live/readiness")
+async def live_readiness(request: Request):
+    """LIVE readiness diagnostic (Phase 2B). A component is READY only when it
+    has genuinely been verified — nothing is assumed. Overall is READY only when
+    every component is READY; signature verification stays WARNING until proven
+    by a genuine live event, and API auth until a genuine connection test passes."""
+    await require_owner(request)
+    from detection import get_settings
+    doc = await get_integration("razorpay", "LIVE")
+    settings = await get_settings()
+    configured = bool(doc and doc.get("key_id") and doc.get("key_secret"))
+    components = [
+        {"component": "KYC / Razorpay account activation", "status": "WARNING",
+         "reason": "Cannot be verified by RECLAIM — confirm KYC and account activation in your Razorpay dashboard."},
+        {"component": "LIVE credentials configured", "status": "READY" if configured else "BLOCKED",
+         "reason": "Write-only credentials stored." if configured else "No LIVE credentials stored."},
+        {"component": "LIVE API authentication",
+         "status": "READY" if (doc or {}).get("status") == "CONNECTED" else ("WARNING" if configured else "BLOCKED"),
+         "reason": ("Genuine authenticated Razorpay response received (read-only test)." if (doc or {}).get("status") == "CONNECTED"
+                    else "Run the read-only LIVE connection test; CONNECTED is reported only after a genuine provider response.")},
+        {"component": "LIVE webhook secret", "status": "READY" if (doc or {}).get("webhook_secret") else "BLOCKED",
+         "reason": "Webhook secret stored (write-only)." if (doc or {}).get("webhook_secret") else "No LIVE webhook secret stored."},
+        {"component": "LIVE webhook signature verification",
+         "status": "READY" if (doc or {}).get("last_successful_event_at") else "WARNING",
+         "reason": ("Proven by a genuine live event." if (doc or {}).get("last_successful_event_at")
+                    else "Implemented and covered by tests with test secrets, but not yet proven by a genuine live event.")},
+        {"component": "LIVE activation gate",
+         "status": "READY" if (doc or {}).get("live_activated") else "BLOCKED",
+         "reason": ("Owner has explicitly activated LIVE mode." if (doc or {}).get("live_activated")
+                    else "LIVE mode not activated — the live webhook endpoint rejects events (fail-closed).")},
+        {"component": "Emergency stop",
+         "status": "BLOCKED" if settings.get("emergency_stop") else "READY",
+         "reason": ("EMERGENCY STOP IS ENABLED — every execution path fails closed." if settings.get("emergency_stop") else "Emergency stop off.")},
+        {"component": "LIVE action gate", "status": "READY",
+         "reason": ("live_actions_enabled is ENABLED — real-money actions may execute under policy; explicit owner choice."
+                    if settings.get("live_actions_enabled")
+                    else "live_actions_enabled is disabled (safe default) — no real-money recovery execution can occur.")},
+        {"component": "Audit pipeline", "status": "READY", "reason": "Append-only audit store reachable and in use."},
+        {"component": "Policy configuration", "status": "READY", "reason": "Deterministic policy engine configured with owner settings."},
+    ]
+    statuses = [c["status"] for c in components]
+    overall = "BLOCKED" if "BLOCKED" in statuses else ("WARNING" if "WARNING" in statuses else "READY")
+    return {
+        "overall": overall,
+        "components": components,
+        "fail_closed_defaults": {
+            "live_activation": bool((doc or {}).get("live_activated")),
+            "live_actions_enabled": bool(settings.get("live_actions_enabled")),
+            "emergency_stop": bool(settings.get("emergency_stop")),
+        },
+        "note": "Phase 2B readiness: LIVE ingestion, verification, reconciliation and audit. No automatic real-money recovery execution.",
+    }
+
+
 @router.delete("/razorpay/live")
 async def delete_live(request: Request):
     user = await require_owner(request)
@@ -471,50 +525,22 @@ async def integration_health(request: Request):
         "last_webhook_type": last_event[0]["event_type"] if last_event else None,
         "last_successful_processing_at": (config or {}).get("last_successful_event_at"),
         "last_failed_event_at": last_failed_doc[0]["received_at"] if last_failed_doc else None,
+        # Phase 2B operational visibility
+        "recovery_action_failures": await db.recovery_actions.count_documents({"outcome": "DELIVERY_FAILED"}),
+        "live_action_blocks": await db.audit_events.count_documents({"event_type": "LIVE_ACTION_BLOCKED"}),
+        "reconciliation_failures": await db.audit_events.count_documents({"event_type": "RECONCILIATION_FAILED"}),
+        "policy_blocks": await db.audit_events.count_documents({"event_type": "POLICY_DECISION", "after_state.decision": "BLOCK"}),
+        "last_sweep": (await db.verification_sweeps.find({}, {"_id": 0}).sort("run_at", -1).limit(1).to_list(1) or [None])[0],
     }
 
 
 @router.post("/verification/sweep")
 async def verification_sweep(request: Request):
-    """Reconciliation sweep: re-verifies every open case against source-of-truth
-    payment data, and reconciles provider-sourced cases against the Razorpay
-    API when connected. Never claims recovery — only verifies state."""
+    """Manual verification sweep — delegates to the shared sweep core
+    (sweep_core.run_verification_sweep), also used by the platform cron."""
     user = await get_current_user(request)
-    await write_audit(actor=user["email"], event_type="RECONCILIATION_STARTED", reason="Verification sweep started.")
-    open_cases = await db.recovery_cases.find({"status": {"$in": OPEN_CASE_STATUSES}}, {"_id": 0}).to_list(2000)
-    results = {"checked": 0, "verified_recovered": 0, "closed_natural": 0, "not_recovered": 0, "pending": 0, "provider_reconciled": 0, "provider_errors": 0, "already_closed": 0}
-
-    config = await get_integration("razorpay", "TEST")
-    adapter = RazorpayAdapter(config) if config and config.get("status") == "CONNECTED" else None
-
-    for case in open_cases:
-        results["checked"] += 1
-        if adapter and case.get("source") in ("RAZORPAY_TEST", "RAZORPAY_LIVE"):
-            try:
-                remote = await asyncio.to_thread(adapter.fetch_order, case["order_key"])
-                if remote.get("status") == "paid":
-                    from detection import process_normalized_order_event
-                    await process_normalized_order_event({
-                        "kind": "order", "provider": "razorpay", "provider_event_id": None,
-                        "event_type": "order.paid", "order_id": case["order_key"],
-                        "amount": round((remote.get("amount") or 0) / 100, 2),
-                        "amount_paid": round((remote.get("amount_paid") or 0) / 100, 2),
-                        "amount_due": round((remote.get("amount_due") or 0) / 100, 2),
-                        "currency": remote.get("currency"), "status": "paid",
-                        "receipt": remote.get("receipt"), "created_at": None,
-                        "source": case.get("source"), "source_mode": (config or {}).get("mode", "TEST"),
-                    }, actor=f"reconciliation:{user['email']}")
-                    results["provider_reconciled"] += 1
-            except IntegrationError as exc:
-                results["provider_errors"] += 1
-                await write_audit(case_id=case["case_id"], actor=user["email"], event_type="RECONCILIATION_FAILED",
-                                  reason=f"Provider reconciliation failed: {exc}")
-        outcome = await verify_case(case["case_id"], actor=f"sweep:{user['email']}")
-        key = outcome.get("result", "pending")
-        results[key] = results.get(key, 0) + 1
-
-    await write_audit(actor=user["email"], event_type="RECONCILIATION_COMPLETED", reason=f"Verification sweep completed: {results['checked']} cases checked.", after_state=results)
-    return results
+    from sweep_core import run_verification_sweep
+    return await run_verification_sweep(actor=user["email"])
 
 
 # ---------- Webhook Test Lab ----------

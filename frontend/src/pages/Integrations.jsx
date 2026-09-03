@@ -110,6 +110,19 @@ export default function Integrations() {
   const activateLive = () => liveCall(() => api.post("/integrations/razorpay/live/activate", { confirmation: liveConfirm }), "LIVE mode ACTIVATED — live webhooks are now accepted");
   const deactivateLive = () => liveCall(() => api.post("/integrations/razorpay/live/deactivate"), "LIVE mode deactivated");
 
+  const [readiness, setReadiness] = useState(null);
+  const runReadiness = async () => {
+    setLiveBusy(true);
+    try {
+      const res = await api.get("/integrations/razorpay/live/readiness");
+      setReadiness(res.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Readiness check failed");
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+
   const load = useCallback(() => {
     api.get("/integrations").then((res) => {
       setConfig(res.data.integrations[0]);
@@ -379,7 +392,7 @@ export default function Integrations() {
           <div>
             <h2 className="font-heading text-lg font-medium text-slate-900">Razorpay LIVE — Production Mode</h2>
             <p className="mt-1 text-xs text-slate-600">
-              Phase 2A readiness: completely isolated credentials, webhook secret and endpoint
+              Phase 2B readiness: completely isolated credentials, webhook secret and endpoint
               (<span className="font-mono">/api/webhooks/razorpay/live</span>). Ingestion, verification,
               reconciliation and audit only — <strong>no real-money recovery execution</strong>.
             </p>
@@ -439,6 +452,30 @@ export default function Integrations() {
             Register that URL in your Razorpay dashboard (Live Mode) with the live webhook secret.
           </p>
         )}
+        <div className="mt-4 border-t border-amber-200 pt-4">
+          <button data-testid="live-readiness-btn" onClick={runReadiness} disabled={liveBusy}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40">
+            Run LIVE readiness check
+          </button>
+          {readiness && (
+            <div className="mt-3" data-testid="live-readiness-panel">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Overall:</span>
+                <StatusBadge value={readiness.overall} />
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                {readiness.components.map((c) => (
+                  <li key={c.component} className="flex items-start gap-2 text-xs" data-testid={`readiness-${c.component.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`}>
+                    <span className={`mt-0.5 inline-block h-2 w-2 rounded-full ${c.status === "READY" ? "bg-emerald-500" : c.status === "WARNING" ? "bg-amber-500" : "bg-red-500"}`} />
+                    <span className="font-medium text-slate-800">{c.component}</span>
+                    <span className="text-slate-500">— {c.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
         {live?.live?.last_error && (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700" data-testid="live-error">{live.live.last_error}</div>
         )}
@@ -530,6 +567,10 @@ export default function Integrations() {
               ["Signature failures", health.signature_failures],
               ["Provider cases", health.cases_created_from_provider],
               ["Recovered outcomes", health.recovered_outcomes_detected],
+              ["Recovery action failures", health.recovery_action_failures],
+              ["LIVE action blocks", health.live_action_blocks],
+              ["Reconciliation failures", health.reconciliation_failures],
+              ["Policy blocks", health.policy_blocks],
             ].map(([label, value]) => (
               <div key={label} className="bg-white p-4">
                 <div className="text-xl font-semibold tabular-nums text-slate-900" data-testid={`health-${label.toLowerCase().replace(/ /g, "-")}`}>{value}</div>
@@ -544,6 +585,9 @@ export default function Integrations() {
           <div className="mt-3 text-xs text-slate-500 font-mono">
             Last webhook: {fmtTime(health.last_webhook_at)} {health.last_webhook_type ? `(${health.last_webhook_type})` : ""} ·
             Last failed: {fmtTime(health.last_failed_event_at)}
+            {health.last_sweep && (
+              <span data-testid="health-last-sweep">Last sweep: {fmtTime(health.last_sweep.run_at)} — {health.last_sweep.results?.checked ?? 0} checked, {health.last_sweep.results?.verified_recovered ?? 0} verified recovered, {health.last_sweep.results?.provider_errors ?? 0} provider errors</span>
+            )}
           </div>
         )}
         {sweepResult && (

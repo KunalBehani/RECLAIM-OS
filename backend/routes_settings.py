@@ -15,6 +15,7 @@ EDITABLE_KEYS = {
     "confidence_threshold": (int, float),
     "max_total_cost_per_case": (int, float),
     "live_actions_enabled": bool,
+    "max_customer_actions_per_day": int,
 }
 
 
@@ -43,4 +44,21 @@ async def update_settings(request: Request):
             before_state={k: current.get(k) for k in updates},
             after_state=updates,
         )
+        # Safety-critical switches get their own explicit audit events.
+        if "emergency_stop" in updates:
+            await write_audit(
+                actor=user["email"],
+                event_type="EMERGENCY_STOP_ENABLED" if updates["emergency_stop"] else "EMERGENCY_STOP_DISABLED",
+                reason=("Global emergency stop ENABLED — all autonomous actions halt; every execution path fails closed."
+                        if updates["emergency_stop"] else
+                        "Global emergency stop disabled by owner."),
+            )
+        if "live_actions_enabled" in updates:
+            await write_audit(
+                actor=user["email"],
+                event_type="LIVE_ACTIONS_ENABLED" if updates["live_actions_enabled"] else "LIVE_ACTIONS_DISABLED",
+                reason=("LIVE actions explicitly ENABLED by owner — live execution gates now permit policy-approved actions."
+                        if updates["live_actions_enabled"] else
+                        "LIVE actions disabled (safe default restored)."),
+            )
     return {"settings": await get_settings()}

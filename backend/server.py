@@ -17,6 +17,7 @@ from routes_dashboard import router as dashboard_router  # noqa: E402
 from routes_ingest import router as ingest_router  # noqa: E402
 from routes_integrations import router as integrations_router  # noqa: E402
 from routes_recovery import router as recovery_router  # noqa: E402
+from routes_cron import router as cron_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
 from routes_simulate import router as simulate_router  # noqa: E402
 from routes_webhooks import router as webhooks_router  # noqa: E402
@@ -30,7 +31,7 @@ async def root():
     return {"service": "RECLAIM OS API", "status": "ok", "version": "1.0.0"}
 
 
-for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router, recovery_router):
+for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router, recovery_router, cron_router):
     api_router.include_router(router)
 
 app.include_router(api_router)
@@ -54,6 +55,7 @@ async def startup():
     await db.orders.create_index("order_id", unique=True)
     await db.payment_attempts.create_index("payment_id", unique=True)
     await db.payment_attempts.create_index("order_id")
+    await db.cron_runs.create_index([("run_id", 1), ("job", 1)], unique=True)
     await db.payment_attempts.create_index("invoice_id")
     await db.recovery_cases.create_index("order_key")
     await db.recovery_cases.create_index("status")

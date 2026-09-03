@@ -15,6 +15,8 @@ async def write_audit(
     policy_rule_reference=None,
     model_version=None,
     related=None,
+    correlation_id=None,
+    provider_mode=None,
 ):
     doc = {
         "event_id": f"evt_{uuid.uuid4().hex[:12]}",
@@ -28,6 +30,8 @@ async def write_audit(
         "policy_rule_reference": policy_rule_reference,
         "model_version": model_version,
         "related": related or {},
+        "correlation_id": correlation_id,
+        "provider_mode": provider_mode,
     }
     await db.audit_events.insert_one(doc)
     doc.pop("_id", None)

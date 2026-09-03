@@ -74,6 +74,16 @@ def _mask_case(case: dict) -> dict:
 def _sort_cases(cases: list, sort: str) -> list:
     if sort == "oldest":
         return sorted(cases, key=lambda c: c.get("created_at") or "")
+    if sort == "eiv_desc":
+        # Highest expected incremental value of the recommended action first.
+        def _eiv(c):
+            rec = c.get("recommended_action")
+            evs = [e.get("expected_incremental_value") or 0 for e in (c.get("action_evaluations") or []) if e.get("action_type") == rec]
+            return evs[0] if evs else 0
+        return sorted(cases, key=_eiv, reverse=True)
+    if sort == "attention":
+        # Open cases needing attention: oldest first, highest value first within each day.
+        return sorted(cases, key=lambda c: ((c.get("created_at") or "")[:10], -float(c.get("amount_at_risk") or 0)))
     if sort in ("amount_desc", "amount_asc"):
         # Never blend currencies: group by currency, sort within each group.
         reverse = sort == "amount_desc"
@@ -112,6 +122,10 @@ async def _audit_for_case(case: dict) -> list:
 async def list_cases(request: Request, status: str | None = None, outcome: str | None = None,
                      policy: str | None = None, q: str | None = None, stage: str | None = None,
                      source: str | None = None, attributed_action: str | None = None,
+                     failure: str | None = None, verification: str | None = None,
+                     attribution: str | None = None,
+                     min_amount: float | None = None, max_amount: float | None = None,
+                     created_from: str | None = None, created_to: str | None = None,
                      sort: str = "newest", limit: int = 500):
     await get_current_user(request)
     query = {}
@@ -123,6 +137,26 @@ async def list_cases(request: Request, status: str | None = None, outcome: str |
         query["policy_result.decision"] = policy
     if attributed_action:
         query["attributed_action"] = attributed_action
+    if failure:
+        query["failure_code"] = {"$regex": failure, "$options": "i"}
+    if verification:
+        query["verification_status"] = verification
+    if attribution:
+        query["attribution_strength"] = attribution
+    if min_amount is not None or max_amount is not None:
+        rng = {}
+        if min_amount is not None:
+            rng["$gte"] = min_amount
+        if max_amount is not None:
+            rng["$lte"] = max_amount
+        query["amount_at_risk"] = rng
+    if created_from or created_to:
+        drng = {}
+        if created_from:
+            drng["$gte"] = created_from
+        if created_to:
+            drng["$lte"] = created_to
+        query["created_at"] = drng
     if q:
         query["$or"] = [
             {"case_id": {"$regex": q, "$options": "i"}},
