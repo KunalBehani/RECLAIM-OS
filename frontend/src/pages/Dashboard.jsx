@@ -79,8 +79,8 @@ export default function Dashboard() {
   if (!summary) {
     return (
       <div className="space-y-6" data-testid="dashboard-loading">
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-6">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36" />)}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-36" />)}
         </div>
         <Skeleton className="h-64" />
       </div>
@@ -126,7 +126,7 @@ export default function Dashboard() {
         </div>
       </PageHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         <KpiCard label="Revenue Currently at Risk" accent="border-l-amber-500" testId="kpi-revenue-at-risk"
           onClick={() => drillTo({ stage: "at_risk" })}
           tooltip="Sum of amount-at-risk over cases in an active lifecycle state (Open, Evaluated, Approval pending, Action executed, Verifying). Invalid, stopped and closed cases are excluded. Currencies are always reported separately — never converted or blended. Click to see every contributing case."
@@ -139,13 +139,6 @@ export default function Dashboard() {
           tooltip="Only cases where a successful settlement was independently observed in source-of-truth payment data AFTER a system action executed. Sent links, reminders and predictions count as zero. Click to see the contributing cases. All-time period."
           sub={<>{kpis.verified_recovered_count} verified recover{kpis.verified_recovered_count === 1 ? "y" : "ies"} · All time · Natural recoveries tracked separately, never counted: {fmtMap(kpis.natural_recovered_not_counted)}</>}>
           <MoneyMap amounts={kpis.verified_gross_recovery} />
-        </KpiCard>
-
-        <KpiCard label="Verified Net Recovery" accent="border-l-green-600" testId="kpi-verified-net"
-          onClick={openLedger}
-          tooltip="Verified Recovery minus all executed action costs. Every cost is a flat catalog cost recorded on an executed action record — click to open the full cost/recovery ledger and inspect each line. A negative currency line means action costs exceeded verified recovery in that currency."
-          sub={<>Gross {fmtMap(kpis.verified_gross_recovery)} − costs {fmtMap(kpis.action_costs)} ({kpis.executed_action_count} executed actions) · <span className="font-medium text-slate-700">Cost ledger →</span></>}>
-          <MoneyMap amounts={kpis.verified_net_recovery} />
         </KpiCard>
 
         <KpiCard label="Active Cases" accent="border-l-blue-500" testId="kpi-active-cases"
@@ -166,12 +159,29 @@ export default function Dashboard() {
           ) : `${kpis.recovery_rate_pct}%`}
         </KpiCard>
 
-        <KpiCard label="Exceptions" accent="border-l-red-500" testId="kpi-exceptions"
-          onClick={() => navigate("/review")}
-          tooltip="Records that failed validation (bad amounts, unsupported statuses, missing linkage, duplicates). They are excluded from every financial total until resolved. Click to inspect each one in the review queue."
-          sub="Excluded from all financial totals · Inspect →">
-          {kpis.exceptions_open}
-        </KpiCard>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="kpi-secondary">
+        <button data-testid="kpi-verified-net" onClick={openLedger}
+          title="Verified Recovery minus all executed action costs. Every cost is a flat catalog cost recorded on an executed action record — click to open the full cost/recovery ledger and inspect each line. A negative currency line means action costs exceeded verified recovery in that currency."
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 border-l-4 border-l-green-600 bg-white px-5 py-4 text-left transition-colors duration-200 hover:border-slate-300">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Verified Net Recovery</div>
+            <div className="mt-1 text-xs leading-relaxed text-slate-400">
+              Gross {fmtMap(kpis.verified_gross_recovery)} − costs {fmtMap(kpis.action_costs)} ({kpis.executed_action_count} executed actions) · <span className="font-medium text-slate-600">Cost ledger →</span>
+            </div>
+          </div>
+          <div className="shrink-0 text-lg font-medium tabular-nums text-slate-900"><MoneyMap amounts={kpis.verified_net_recovery} /></div>
+        </button>
+        <button data-testid="kpi-exceptions" onClick={() => navigate("/review")}
+          title="Records that failed validation (bad amounts, unsupported statuses, missing linkage, duplicates). They are excluded from every financial total until resolved. Click to inspect each one in the review queue."
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 border-l-4 border-l-red-500 bg-white px-5 py-4 text-left transition-colors duration-200 hover:border-slate-300">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Exceptions</div>
+            <div className="mt-1 text-xs leading-relaxed text-slate-400">Excluded from all financial totals · Inspect →</div>
+          </div>
+          <div className="shrink-0 text-lg font-medium tabular-nums text-slate-900">{kpis.exceptions_open}</div>
+        </button>
       </div>
 
       <section data-testid="recovery-funnel" className="rounded-xl border border-slate-200 bg-white p-6">
