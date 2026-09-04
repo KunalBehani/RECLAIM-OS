@@ -84,13 +84,33 @@ Server-side secrets only (backend env / write-only DB fields). Frontend never re
 
 ## 14. Known Limitations
 
-- LIVE money movement: not implemented and disabled by default (Phase 2B scope). LIVE CONNECTED requires the merchant's genuine live credentials — external prerequisite.
-- Model confidence is UNCALIBRATED (`model_uncalibrated`); Phase 3 ML Evaluation Lab will prove calibration before any calibrated claims.
+- LIVE money movement: not implemented and disabled by default (Phase 2B/3 scope). LIVE CONNECTED requires the merchant's genuine live credentials — external prerequisite.
+- Model calibration: Phase 3 infrastructure is fully implemented. Model calibration metrics are only meaningful when sufficient genuine historical outcomes exist (minimum 100 observations required for `WELL_CALIBRATED` claim).
 - Recovery emails require a customer email captured from the payment; without one, execution stays SIMULATED.
 - The fully-interactive TEST checkout journey (human card entry in Razorpay's hosted checkout) cannot be browser-automated; it is verified programmatically up to the hosted-checkout boundary and by the user's manual flow.
 
+## 15. ML Evaluation Lab & Model Calibration (Phase 3)
+
+The Phase 3 ML Evaluation Lab provides empirical measurement of AI recovery estimates against authoritative payment outcomes:
+- **Ground Truth Labeling**: Binary outcome based on verified settlement and attribution (`POSITIVE_VERIFIED` for STRONG/MODERATE attribution; `NEGATIVE_UNRECOVERED` for unrecovered after window; `EXCLUDED_NATURAL` for natural recoveries).
+- **Cohort Segregation**: Strict separation between `GENUINE_TEST`, `GENUINE_LIVE`, `IMPORTED`, `SIMULATED`, and `LAB` (marked with `LAB DATA — NOT REAL-WORLD PERFORMANCE`).
+- **Sample-Size Gating**: Gated evaluation (<10 labeled cases yields `INSUFFICIENT_DATA`; <30 yields `DESCRIPTIVE ONLY — LOW SAMPLE SIZE`; >=100 required for `WELL_CALIBRATED`).
+- **Calibration Engine**: Brier score, 10 probability buckets, Expected Calibration Error (ECE), and Reliability Diagrams.
+- **Classification Metrics**: TP, FP, TN, FN, Accuracy, Precision, Recall, F1, Specificity, NPV, FPR across configurable thresholds.
+- **Threshold Optimization**: Parametric sweep (0.00–1.00) determining optimal F1 cutoff without modifying production policy.
+- **Action Impact**: Evaluates recovery rates per action with explicit `ASSOCIATIONAL — NOT CAUSAL` labeling.
+- **Immutable Snapshots**: Frozen evaluation runs stored in `evaluation_runs` collection for auditability and reproducibility.
+
+## 16. Production Readiness & Security Controls (Phase 4A)
+
+- **RBAC Authorization**: Policy configuration, emergency stop switches, and live action toggles are strictly restricted to `role: "owner"`. Non-owner roles (`analyst`) receive HTTP 403 Forbidden.
+- **Credential Masking**: API responses redact secret keys (`key_secret`, `webhook_secret`). Key IDs are masked (`rzp_test_********`).
+- **Fail-Closed LIVE Gates**: `emergency_stop` defaults to `True` and `live_actions_enabled` defaults to `False`. Execution fails closed immediately before any provider request.
+- **Deployment Hardening**: Standardized `.env.example` templates provided. Frontend `api.js` includes a safe fallback for reverse-proxy and subpath setups.
+- **Security Test Suite**: Dedicated automated tests (`test_phase4a_security_readiness.py`) verify RBAC, secret masking, HMAC validation, and token order isolation.
+
 ## Status Legend
 
-- **IMPLEMENTED + TESTED**: detection, policy, EIV, attribution, verification, reconciliation, TEST webhooks, recovery emails, same-order retry, LIVE safety architecture, state machine, cooldowns, cron sweep, audit trail.
+- **IMPLEMENTED + TESTED**: detection, policy, EIV, attribution, verification, reconciliation, TEST webhooks, recovery emails, same-order retry, LIVE safety architecture, state machine, cooldowns, cron sweep, audit trail, ML Evaluation Lab, calibration engine, frozen snapshots, Phase 4A security hardening, RBAC enforcement, environment configuration templates.
 - **LIVE-READY**: LIVE ingestion/verification/reconciliation/audit path (tested with test secrets; awaits genuine live credentials for end-to-end proof).
 - **LIVE-EXECUTION**: NOT implemented. Not tested. Disabled by default. Any claim otherwise would be false.

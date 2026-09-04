@@ -53,6 +53,8 @@ SOURCE_CATEGORIES = {
     "TEST": "SIMULATED",
     "RAZORPAY_TEST": "TEST_MODE",
     "RAZORPAY_LIVE": "LIVE",
+    "TEST_LAB": "LAB",
+    "LAB": "LAB",
 }
 
 
@@ -68,10 +70,16 @@ def humanize_failure(code):
 
 
 def source_category(doc):
-    """Consistent source taxonomy: LIVE / TEST MODE / IMPORTED / SIMULATED.
-    Simulated always wins — simulated data must never be mistaken for live data."""
-    if doc.get("simulated"):
+    """Consistent source taxonomy: LIVE / TEST_MODE / LAB / IMPORTED / SIMULATED.
+    Lab and Simulated data must never be mistaken for genuine production data."""
+    if doc.get("is_lab") or doc.get("data_stage") == "LAB":
+        return "LAB"
+    if doc.get("simulated") or doc.get("data_stage") == "SIMULATED":
         return "SIMULATED"
+    if doc.get("data_stage"):
+        if doc["data_stage"] == "TEST":
+            return "TEST_MODE"
+        return doc["data_stage"]
     return SOURCE_CATEGORIES.get(doc.get("source"), "IMPORTED")
 
 

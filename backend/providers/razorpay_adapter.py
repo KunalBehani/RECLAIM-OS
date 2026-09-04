@@ -74,6 +74,13 @@ class RazorpayAdapter(ProviderAdapter):
 
         entity = ((payload.get("payload") or {}).get("payment") or {}).get("entity") or {}
         created_iso = _iso_from_epoch(entity.get("created_at"))
+        is_lab = bool(
+            payload.get("account_id") == "acc_TESTLAB"
+            or str(entity.get("order_id") or "").startswith("order_LAB")
+            or str(entity.get("id") or "").startswith("pay_LAB")
+        )
+        source = "TEST_LAB" if is_lab else self.source
+        data_stage = "LAB" if is_lab else ("LIVE" if self.mode == "LIVE" else "TEST")
         attempt = {
             "payment_id": entity.get("id"),
             "order_id": entity.get("order_id"),
@@ -90,7 +97,10 @@ class RazorpayAdapter(ProviderAdapter):
             "captured_at": created_iso if event_type == "payment.captured" else None,
             "provider": self.provider,
             "provider_event_ids": [provider_event_id] if provider_event_id else [],
-            "source": self.source,
+            "source": source,
+            "source_mode": self.mode,
+            "data_stage": data_stage,
+            "is_lab": is_lab,
             "source_event_id": provider_event_id,
             "simulated": False,
             "ingestion_confidence": 1.0,

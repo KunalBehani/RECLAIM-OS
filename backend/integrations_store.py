@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Integration credential storage. Secrets live only server-side in MongoDB
 and are NEVER returned by any API response — only masked metadata."""
 

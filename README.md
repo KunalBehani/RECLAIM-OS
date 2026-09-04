@@ -4,168 +4,224 @@
 
 > Revenue at risk doesn't have to become revenue lost.
 
-RECLAIM OS is an intelligent, policy-bounded revenue recovery platform for merchants. It detects genuinely unresolved revenue at risk (primary use case: **failed payment recovery**), analyzes the situation, recommends or executes only permitted recovery actions, verifies outcomes independently, and maintains a complete audit trail.
+RECLAIM OS is an intelligent, policy-bounded revenue recovery platform for merchants. It detects genuinely unresolved revenue at risk (primary use case: **failed payment recovery**), analyzes recoverability, applies deterministic policy rules, executes controlled recovery actions, independently verifies payment outcomes via payment providers, and attributes recovered revenue using verifiable provider evidence.
 
 ---
 
-## Why RECLAIM OS Is Different
+## Core Principle
 
-- **A failed payment ≠ lost revenue.** The engine first searches for later successful payments and replacement attempts. Orders that recovered naturally never create a case and are never counted.
-- **Natural recovery baseline.** Every case is compared against a do-nothing baseline (`P(natural recovery)`), not against zero.
-- **Incremental value optimization.** Actions are ranked by `Expected Incremental Value = amount × (P(recovery|action) − P(natural)) − cost` — not by raw recovery probability or action volume.
-- **AI recommends, deterministic policy decides.** A deterministic, testable policy engine sits between the AI and execution: ALLOW / BLOCK / APPROVAL / STOP. The AI cannot override it; a human approval can clear an APPROVAL gate but never a BLOCK/STOP.
-- **Bounded autonomy.** Retry limits, cooldowns, recovery windows, per-case cost caps, confidence thresholds, amount thresholds, do-not-contact lists and a global emergency stop.
-- **Verified outcomes only.** Executed ≠ recovered. Only a successful settlement observed in source-of-truth payment data closes a case as `VERIFIED_RECOVERED`. Predictions, sent reminders, generated links and scheduled actions count as **0** until verified.
-- **Three metrics, never blended.** Revenue at Risk / Expected Recoverable Value / Verified Recovered Revenue are always displayed separately. Natural recoveries are tracked but explicitly *not counted* as system recovery.
-- **Honest taxonomy everywhere.** REAL / TEST MODE / SIMULATED / UNVERIFIED / VERIFIED are structurally separated in the data model and the UI.
+$$\text{AI recommends} \longrightarrow \text{Policy decides} \longrightarrow \text{Provider verifies} \longrightarrow \text{Attribution determines recovery impact}$$
+
+1. **AI recommends**: Claude Sonnet (`claude-sonnet-4-6`) estimates diagnosis, natural recovery probability, and action recovery probabilities. AI is strictly advisory and cannot execute actions or modify financial state.
+2. **Policy decides**: A deterministic, testable policy engine enforces boundaries: `ALLOW` / `BLOCK` / `APPROVAL` / `STOP`. Retry limits, cooldowns, per-case cost caps, amount thresholds, and an emergency stop are unconditionally applied.
+3. **Provider verifies**: Executed $\neq$ recovered. Only an authentic settlement observed in source-of-truth payment provider data (e.g. Razorpay webhook or direct provider API lookup) closes a case as `VERIFIED_RECOVERED`.
+4. **Attribution determines recovery impact**: Natural recoveries (customer settling on their own without system assistance) are separated from action-assisted recoveries. Recovered revenue is credited only when attributable to a verified recovery action.
 
 ---
 
 ## Architecture
 
-Modular monolith — React frontend, FastAPI backend, MongoDB.
+RECLAIM OS is built as a modular monolith with a React frontend, FastAPI backend, and MongoDB persistence.
 
 ```
-app/
+RECLAIM-OS/
 ├── backend/
-│   ├── server.py            # app assembly, indexes, settings seed
-│   ├── database.py          # Mongo (motor) + policy settings
-│   ├── constants.py         # status taxonomies, datetime helpers
-│   ├── auth.py              # Emergent Google OAuth session exchange
-│   ├── ingestion.py         # CSV/XLSX parsing, schema suggestion, validation
-│   ├── detection.py         # unified recovery engine (linking, cases, verification)
-│   ├── intelligence.py      # Claude Sonnet analysis + deterministic fallback
-│   ├── policy.py            # action catalog + deterministic policy engine
-│   ├── execution.py         # idempotent action adapter (SIMULATED in this env)
-│   ├── security_utils.py    # HMAC webhook signatures
-│   ├── audit.py             # immutable-style audit events
-│   ├── routes_*.py          # ingest / cases / dashboard / webhooks / simulate / settings
-│   └── tests/test_core.py   # unit + engine integration tests
-└── frontend/src/
-    ├── pages/               # Dashboard, CaseDetail, Ingest, ReviewQueue, Events, Login
-    ├── components/          # Layout, StatusBadge, Money, KpiCard
-    └── context/AuthContext.jsx
+│   ├── server.py                 # FastAPI application assembly, indexes, middleware
+│   ├── database.py               # MongoDB motor client, connection resilience
+│   ├── constants.py              # Status taxonomies, state machine transitions
+│   ├── auth.py                   # Google OAuth session exchange, RBAC
+│   ├── ingestion.py              # CSV/XLSX parsing, schema suggestion, validation
+│   ├── detection.py              # Recovery engine: linking, case creation, verification
+│   ├── intelligence.py           # Claude Sonnet analysis + deterministic fallback
+│   ├── policy.py                 # Action catalog + deterministic policy engine
+│   ├── execution.py              # Idempotent action execution adapter (Email, Link, Retry)
+│   ├── evaluation.py             # ML Evaluation Lab: metrics, calibration, Brier, ECE, curves
+│   ├── sweep_core.py             # Independent verification sweep core engine
+│   ├── security_utils.py         # HMAC-SHA256 signature verification & generation
+│   ├── audit.py                  # Immutable audit trail with correlation IDs
+│   ├── integrations_store.py     # Provider credential isolation & secret masking
+│   ├── routes_*.py               # Endpoints: cases, dashboard, evaluation, ingest, recovery...
+│   └── tests/                    # Automated regression and security test suites
+└── frontend/
+    ├── src/
+    │   ├── pages/                # Dashboard, CaseDetail, EvaluationLab, Integrations, Review...
+    │   ├── components/           # Layout, StatusBadge, Money, KpiCard, DecisionReplay...
+    │   └── context/              # AuthContext, session management
 ```
 
-### Core lifecycle
+### Complete Golden Path Flow
 
 ```
-payment event / merchant data
-  → validate & normalize
-  → detect failed/unresolved payment
-  → link related order / invoice / attempts
-  → check for natural recovery
-  → create Revenue-at-Risk case (one per order — no double counting)
-  → AI analysis (diagnosis, natural-recovery baseline, action ranking)
-  → deterministic policy engine (ALLOW / BLOCK / APPROVAL / STOP)
-  → execute only authorized actions (SIMULATED adapter here)
-  → verify outcome from source-of-truth payment data
-  → count only VERIFIED recovery
-  → append immutable audit trail (Decision Replay renders it)
+Razorpay TEST Order (e.g. ₹500)
+       │
+       ▼
+Payment Failure (e.g. insufficient funds)
+       │
+       ▼
+Signed Razorpay Webhook (`payment.failed`)
+       │
+       ▼
+Raw-Body HMAC-SHA256 Verification (constant-time digest comparison)
+       │
+       ▼
+Idempotent Event Normalization (provider_events collection)
+       │
+       ▼
+Recovery Case Creation (one case per order key — no double counting)
+       │
+       ▼
+AI Analysis (Claude Sonnet: diagnosis, natural baseline, recovery likelihood)
+       │
+       ▼
+Deterministic Policy Engine (ALLOW / BLOCK / APPROVAL / STOP)
+       │
+       ▼
+Recovery Action Execution (Resend real notification / tokenized recovery link)
+       │
+       ▼
+Customer Same-Order Retry Checkout (genuine Razorpay hosted checkout)
+       │
+       ▼
+Provider-Side Settlement Verification (`payment.captured` / provider verification)
+       │
+       ▼
+Attribution Assessment (STRONG / MODERATE / UNCERTAIN / NATURAL)
+       │
+       ▼
+Case Closure (`VERIFIED_RECOVERED` + incremental recovered amount)
+       │
+       ▼
+Audit Trail & Reconciliation Update (persisted audit events with correlation IDs)
 ```
-
-### Data ingestion — two modes, one engine
-
-- **Mode A — real-time webhooks.** `POST /api/webhooks/payments` with HMAC-SHA256 signature (`X-Reclaim-Signature: sha256=<hex>`), unique `event_id` (replay-safe idempotency), timestamp validation (24h tolerance), security-event logging for invalid signatures. A clearly labeled **simulator** (`/events` page) signs SIMULATED events with the server secret and pushes them through the exact same pipeline.
-- **Mode B — batch upload.** CSV/XLSX/XLS → header detection → deterministic synonym matching + Claude-assisted schema suggestion → user confirms mapping (critical financial fields are never silently guessed) → data-quality report (valid/invalid/duplicates/invalid amounts/invalid dates/unsupported statuses/exception queue) → normalized records flow through the same engine.
-
-### Intelligence layer
-
-Claude Sonnet (`claude-sonnet-4-6` via the Emergent universal key) estimates natural-recovery probability, per-action recovery probabilities, diagnosis, explanation and evidence. The backend blends the LLM's natural-recovery estimate 50/50 with a deterministic heuristic and computes all financial arithmetic deterministically. If the LLM is unavailable, the system falls back to the heuristic engine and labels the case `model_version: heuristic-fallback-v1`. The AI never decides what is allowed and never invents actions outside the catalog.
-
-### Action catalog
-
-`WAIT_NO_ACTION`, `SCHEDULED_RECHECK`, `SAFE_PAYMENT_RETRY`, `SEND_RECOVERY_LINK`, `CUSTOMER_REMINDER`, `ESCALATE_HUMAN`, `STOP_RECOVERY` — each with cost, max executions, cooldown and approval rules.
-
-### Policy engine checks
-
-Emergency stop · case already closed · recovery window expiry · max executions · cooldown · duplicate pending action · per-case cost cap · amount-above-threshold approval · low-confidence approval · do-not-contact · unknown action.
 
 ---
 
-## Setup
+## Key Capabilities & Verified Milestones
+
+### Phase 1 & 1.5: Razorpay TEST Integration & Real Recovery Notifications
+- Genuine Razorpay TEST API authentication and order creation.
+- Raw-body HMAC-SHA256 signature validation on webhooks with replay-safe idempotency.
+- Real transactional customer recovery emails sent via Resend (`delivered@resend.dev` sink in testing).
+- Cryptographically secure, tokenized same-order payment retry links (`/pay/:token`).
+- Interactive Razorpay hosted checkout same-order settlement.
+
+### Phase 2A & 2B: LIVE Safety Architecture & Production Recovery Engine
+- Strict credential isolation: TEST and LIVE credentials stored in segregated documents.
+- Bidirectional credential validation (`rzp_test_` rejected on LIVE; `rzp_live_` rejected on TEST).
+- Write-only credentials: API never returns `key_secret` or `webhook_secret`; keys are masked (`rzp_test_********`).
+- Dedicated verification sweeps (`/api/cron/verification-sweep`) with run-id idempotency and constant-time bearer authentication.
+- Out-of-order event resilience and late direct evidence attribution upgrades (`MODERATE` $\to$ `STRONG`).
+- **Phase 2B Genuine End-to-End Test Demonstration Verified**: Real Razorpay TEST order `order_TXa0ZHoMvOqB6z` (₹500) $\to$ signed `payment.failed` webhook $\to$ recovery case $\to$ real Resend email $\to$ user paid via retry link in hosted checkout $\to$ provider webhook $\to$ **`VERIFIED_RECOVERED` / `STRONG` attribution / ₹500 incremental recovery**.
+
+### Phase 3: ML Evaluation Lab & Calibration Engine
+- Empirical evaluation of AI recovery estimates against authoritative payment outcomes.
+- Strict cohort isolation: `GENUINE_TEST`, `GENUINE_LIVE`, `IMPORTED`, `SIMULATED`, and `LAB` (clearly badged `LAB DATA — NOT REAL-WORLD PERFORMANCE`).
+- Ground truth binary labels: `POSITIVE_VERIFIED` (1), `NEGATIVE_UNRECOVERED` (0), `EXCLUDED_NATURAL` (None), `EXCLUDED_UNCERTAIN` (None).
+- Mathematical metrics: TP, FP, TN, FN, Accuracy, Precision, Recall, F1 Score, Specificity, NPV, FPR across configurable decision cutoffs.
+- Calibration diagnostics: Brier score, 10 probability buckets, Expected Calibration Error (ECE), Reliability Diagrams, and Platt scaling fitting.
+- Transparent sample-size gating: Displays `INSUFFICIENT SAMPLE SIZE` ($N < 10$) or `DESCRIPTIVE ONLY — LOW SAMPLE SIZE` ($10 \le N < 30$). Gated so `WELL_CALIBRATED` requires $N \ge 100$ and $ECE \le 0.05$.
+- Production EIV remains safely labeled as **UNCALIBRATED** to prevent unproven automated overrides.
+- Immutable frozen evaluation runs (`evaluation_runs` collection) for auditability.
+
+### Phase 4A: Production Readiness & Security Hardening
+- RBAC authorization: `PUT /settings` and `/integrations` restricted to `role: "owner"`; non-owners receive HTTP 403 Forbidden.
+- Production environment variable templates (`.env.example`) provided for backend and frontend.
+- Frontend API resilience: safe fallback to relative `/api` paths for reverse-proxy and same-origin deployments.
+- Dedicated security test suite verifying fail-closed LIVE gates, secret masking, HMAC validation, and token order isolation.
+
+---
+
+## LIVE Safety Controls & Fail-Closed Invariants
+
+Real-money transactions must never occur accidentally. Every execution path fails closed:
+
+| Safety Gate | Production Invariant | Enforcement Layer |
+|---|---|---|
+| `emergency_stop` | `True` by default; halts all actions | Policy engine & execution pre-check |
+| `live_actions_enabled` | `False` by default; blocks real money actions | Execution gate (`LIVE_ACTION_BLOCKED`) |
+| `live_activation` | Requires explicit `"ACTIVATE LIVE"` confirmation | Integrations store |
+| LIVE Credentials | Must begin with `rzp_live_`; verified against provider | Integration connection check |
+| Provider Mode | Derived server-side from webhook or configuration | Server-side request routing |
+
+> [!CAUTION]
+> **LIVE Money Movement Status**: Razorpay LIVE execution is **DISABLED** by design in Phase 4A. LIVE credentials have not been configured and KYC is pending. LIVE actions fail closed.
+
+---
+
+## Setup & Deployment
+
+### Prerequisites
+- Python 3.9+ (Python 3.10+ recommended)
+- Node.js 18+
+- MongoDB 6.0+
+
+### 1. Backend Setup
+```bash
+cd backend
+cp .env.example .env
+
+# Configure required environment variables in backend/.env:
+# MONGO_URL=mongodb://localhost:27017
+# DB_NAME=reclaim_os
+# OWNER_EMAIL=your-email@example.com
+# WEBHOOK_SECRET=your-secure-webhook-secret
+# WEBHOOK_CRON_SECRET=your-platform-cron-secret
+# EMERGENT_LLM_KEY=your-emergent-llm-key
+
+pip install -r requirements.txt
+uvicorn server:app --host 0.0.0.0 --port 8001
+```
+
+### 2. Frontend Setup
+```bash
+cd frontend
+cp .env.example .env
+
+# In frontend/.env:
+# REACT_APP_BACKEND_URL=http://localhost:8001 (or leave empty for relative /api)
+
+npm install
+npm run build
+```
+
+---
+
+## Testing & Verification
+
+### Running Automated Test Suites
 
 ```bash
-# backend
-cd backend && pip install -r requirements.txt
-cp .env.example .env   # fill in values
+# Run Phase 4A Security & Production Readiness tests:
+python3 -c "
+import sys; sys.path.insert(0, 'backend'); sys.path.insert(0, 'backend/tests')
+import test_phase4a_security_readiness as t
+for f in [getattr(t, m) for m in sorted(dir(t)) if m.startswith('test_')]:
+    f(); print(f'[PASS] {f.__name__}')
+"
 
-# frontend
-cd frontend && yarn install
+# Run Phase 3 ML Evaluation Lab tests:
+python3 -c "
+import sys; sys.path.insert(0, 'backend'); sys.path.insert(0, 'backend/tests')
+import test_phase3_evaluation as t
+for f in [getattr(t, m) for m in sorted(dir(t)) if m.startswith('test_')]:
+    f(); print(f'[PASS] {f.__name__}')
+"
+
+# Run Full Test Suite (in container environment with pytest):
+cd backend && python3 -m pytest tests/ -v
 ```
 
-Environment variables (backend `.env`):
+---
 
-| Key | Purpose |
-|---|---|
-| `MONGO_URL` / `DB_NAME` | MongoDB connection |
-| `EMERGENT_LLM_KEY` | Universal key for Claude Sonnet |
-| `WEBHOOK_SECRET` | HMAC secret for webhook signatures (server-side only) |
-| `OWNER_EMAIL` | Email that receives the `owner` role on first login |
-| `CORS_ORIGINS` | Allowed origins |
+## Status Legend
 
-Frontend `.env`: `REACT_APP_BACKEND_URL` — the public backend base URL.
-
-## API overview
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /api/auth/session` · `GET /api/auth/me` · `POST /api/auth/logout` | Emergent Google OAuth |
-| `POST /api/webhooks/payments` | Signed event ingestion (idempotent, replay-safe) |
-| `GET /api/webhooks/events` · `GET /api/webhooks/config` | Event log + integration info |
-| `POST /api/ingest/upload` · `POST /api/ingest/{id}/confirm` · `GET /api/ingest/batches` | Batch ingestion |
-| `GET /api/cases` · `GET /api/cases/{id}` · `GET /api/cases/{id}/replay` | Cases + decision replay |
-| `POST /api/cases/{id}/evaluate` · `/verify` · `/execute` · `/review` | Engine controls |
-| `GET /api/review/queue` · `POST /api/exceptions/{id}/resolve` | Human-in-the-loop |
-| `GET /api/dashboard/summary` | Honest metrics, funnel, charts |
-| `GET/PUT /api/settings` | Policy configuration incl. emergency stop |
-| `POST /api/simulate/payment-event` · `/scenario/{1-6}` · `/invalid-signature-test` | Labeled simulator |
-
-### Webhook payload example
-
-```json
-{
-  "event_id": "evt_9f2ac1",
-  "type": "payment.failed",
-  "timestamp": "2026-06-11T10:00:00Z",
-  "data": {
-    "payment_id": "pay_123",
-    "order_id": "ORD-1001",
-    "amount": 2500.00,
-    "currency": "INR",
-    "status": "failed",
-    "failure_code": "insufficient_funds",
-    "payment_method": "card"
-  }
-}
-```
-
-Sign the exact raw body: `X-Reclaim-Signature: sha256=<hmac-sha256-hex(body, WEBHOOK_SECRET)>`.
-
-## Testing
-
-```bash
-cd backend && python -m pytest tests/ -v
-```
-
-Covers: status normalization, EIV math, every policy rule (retry limits, cooldowns, closed-case blocking, emergency stop, window expiry, approval thresholds, cost caps, do-not-contact, unknown actions), webhook signature verify/reject, CSV validation & duplicate detection, header synonym mapping, plus engine integration tests (double-counting prevention, natural recovery, verified recovery attribution).
-
-## Evaluation methodology & limitations
-
-- **Verified recovery** is only counted when a successful settlement is observed in payment data *after* a system action executed. Recoveries with no prior action are reported separately as natural recoveries.
-- **No fabricated ML metrics.** Historical labeled outcomes are not available in this environment, so no accuracy/precision/recall claims are made. The evaluation lab (baseline comparison vs. do-nothing / fixed-rule / blanket-action) is designed for held-out labeled data and is on the roadmap.
-- **Execution is SIMULATED** in this environment: no real payment provider is connected, no real customer is charged or contacted. Simulated executions are labeled end-to-end and never mixed with real integrations.
-- **Currency**: amounts are kept per-record in their original currency; metrics aggregate per currency (no FX conversion is fabricated).
-
-## Security considerations
-
-- Google OAuth (Emergent-managed) gates the dashboard; sessions are httpOnly cookies, verified server-side.
-- Webhook secret never leaves the backend; invalid signatures are rejected and logged as security events.
-- PII minimization: customer references are masked in all API responses.
-- Upload constraints: 5 MB, CSV/XLSX/XLS only, strict validation with an exception queue.
-
-## Known assumptions
-
-- One recovery case per order/invoice key (double-counting is structurally prevented).
-- Action costs are flat values in the case currency.
-- `SCHEDULED_RECHECK` triggers an immediate verification sweep in this environment (no external scheduler).
+| Subsystem / Feature | Status | Description |
+|---|---|---|
+| **Razorpay TEST Webhooks & Ingestion** | `IMPLEMENTED & TESTED` | Genuine HMAC-SHA256 verification, idempotent handling. |
+| **Recovery Engine & Deterministic Policy** | `IMPLEMENTED & TESTED` | Bounded policy, cooldowns, retry caps, cost constraints. |
+| **Customer Notifications (Resend)** | `IMPLEMENTED & TESTED` | Real transactional email delivery with tokenized links. |
+| **Same-Order Hosted Checkout Retry** | `IMPLEMENTED & TESTED` | Genuine Razorpay hosted checkout settlement verified. |
+| **Attribution & Reconciliation** | `IMPLEMENTED & TESTED` | Strong/Moderate attribution, natural recovery separation. |
+| **ML Evaluation Lab** | `IMPLEMENTED & TESTED` | Brier score, ECE, 10 probability buckets, sample gating. |
+| **LIVE Architecture & Safety Controls** | `IMPLEMENTED & TESTED` | Fail-closed defaults, credential isolation, masked secrets. |
+| **LIVE Execution / Money Movement** | `DISABLED & BLOCKED` | Fail-closed. Requires genuine merchant KYC & live credentials. |

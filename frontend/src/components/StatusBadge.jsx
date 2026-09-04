@@ -51,6 +51,13 @@ const STATUS_STYLES = {
   MODERATE: "bg-blue-50 text-blue-700 border-blue-200",
   UNCERTAIN: "bg-amber-50 text-amber-700 border-amber-200",
   REAL: "bg-blue-50 text-blue-700 border-blue-200",
+  LAB: "bg-amber-50 text-amber-800 border-amber-300 font-semibold",
+  WELL_CALIBRATED: "bg-green-50 text-green-700 border-green-200",
+  PARTIALLY_CALIBRATED: "bg-amber-50 text-amber-700 border-amber-200",
+  POORLY_CALIBRATED: "bg-red-50 text-red-700 border-red-200",
+  INSUFFICIENT_DATA: "bg-slate-100 text-slate-600 border-slate-200",
+  DESCRIPTIVE_ONLY: "bg-amber-50 text-amber-700 border-amber-200",
+  ADEQUATE: "bg-green-50 text-green-700 border-green-200",
 };
 
 export default function StatusBadge({ value, className = "" }) {

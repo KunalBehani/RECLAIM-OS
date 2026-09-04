@@ -1,14 +1,21 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
+try:
+    from dotenv import load_dotenv
+    ROOT_DIR = Path(__file__).parent
+    load_dotenv(ROOT_DIR / ".env")
+except ImportError:
+    pass
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
-
-client = AsyncIOMotorClient(os.environ["MONGO_URL"])
-db = client[os.environ["DB_NAME"]]
+mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+db_name = os.environ.get("DB_NAME", "reclaim_os")
+try:
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[db_name]
+except Exception:
+    client = None
+    db = None
 
 
 async def get_settings() -> dict:

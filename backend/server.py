@@ -21,6 +21,7 @@ from routes_cron import router as cron_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
 from routes_simulate import router as simulate_router  # noqa: E402
 from routes_webhooks import router as webhooks_router  # noqa: E402
+from routes_evaluation import router as evaluation_router  # noqa: E402
 
 app = FastAPI(title="RECLAIM OS API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
@@ -31,7 +32,7 @@ async def root():
     return {"service": "RECLAIM OS API", "status": "ok", "version": "1.0.0"}
 
 
-for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router, recovery_router, cron_router):
+for router in (auth_router, ingest_router, cases_router, dashboard_router, webhooks_router, simulate_router, settings_router, integrations_router, recovery_router, cron_router, evaluation_router):
     api_router.include_router(router)
 
 app.include_router(api_router)
@@ -63,6 +64,8 @@ async def startup():
     await db.recovery_actions.create_index("case_id")
     await db.audit_events.create_index("case_id")
     await db.user_sessions.create_index("session_token", unique=True)
+    await db.evaluation_runs.create_index("run_id", unique=True)
+    await db.evaluation_runs.create_index("created_at")
     existing = await db.settings.find_one({"key": "policy"})
     if not existing:
         await db.settings.insert_one(dict(DEFAULT_SETTINGS))

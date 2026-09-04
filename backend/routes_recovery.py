@@ -7,6 +7,16 @@ secret. Completion is accepted only with a valid Razorpay checkout signature
 (HMAC-SHA256 of order_id|payment_id with the server-side key_secret), which is
 what lets attribution link the resulting payment back to the recovery action
 honestly (STRONG).
+
+Provider-mode isolation guarantee
+----------------------------------
+The Razorpay integration configuration is selected exclusively from the
+authoritative server-side ``case["provider_mode"]`` field that is written by
+the detection pipeline at case-creation time and is never mutated afterwards.
+It is impossible for:
+  - a LIVE case to receive TEST credentials, or
+  - a TEST case to receive LIVE credentials.
+Client input (query parameters, request body) is never used to select the mode.
 """
 import hashlib
 import hmac
@@ -30,7 +40,68 @@ class CompleteBody(BaseModel):
     razorpay_signature: str
 
 
+# Authoritative mapping from known case source/provider_mode values to the
+# Razorpay integration mode that MUST be used.  Any value absent from this
+# table causes a fail-closed 400 — the system never silently falls back to
+# the wrong credential set.
+_SOURCE_TO_INTEGRATION_MODE: dict[str, str] = {
+    "RAZORPAY_TEST": "TEST",
+    "RAZORPAY_LIVE": "LIVE",
+    "WEBHOOK":       "TEST",   # generic merchant webhook — always TEST
+    "SIMULATOR":     "TEST",
+    "TEST":          "TEST",
+    "TEST_LAB":      "TEST",
+    "CSV_UPLOAD":    "TEST",
+    "XLSX_UPLOAD":   "TEST",
+    "FILE_IMPORT":   "TEST",
+}
+
+
+def _mode_for_case(case: dict) -> str:
+    """Return the Razorpay integration mode (``"TEST"`` or ``"LIVE"``) that
+    must be used for this case.
+
+    The primary authoritative source is ``case["provider_mode"]``, written at
+    case-creation time by the detection pipeline and never mutated afterwards.
+    ``case["source"]`` is consulted as a secondary signal for older documents
+    that pre-date the ``provider_mode`` field.
+
+    Raises HTTP 400 for any unrecognised value so the system fails closed
+    rather than silently selecting the wrong credentials.
+    """
+    # Primary: provider_mode written at case creation ("TEST" or "LIVE").
+    pm = (case.get("provider_mode") or "").strip().upper()
+    if pm == "LIVE":
+        return "LIVE"
+    if pm == "TEST":
+        return "TEST"
+
+    # Secondary: source field (backwards-compat for pre-provider_mode docs).
+    source = (case.get("source") or "").strip()
+    mode = _SOURCE_TO_INTEGRATION_MODE.get(source)
+    if mode is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot determine integration mode for case {case.get('case_id')!r}: "
+                f"unrecognised provider_mode={pm!r} and source={source!r}. "
+                "Refusing to proceed to prevent credential mismatch."
+            ),
+        )
+    return mode
+
+
 async def _load(token: str):
+    """Load and validate a recovery action, its case, and the correct
+    mode-specific Razorpay integration configuration.
+
+    Fail-closed contract:
+      - Token not found or expired          → 404
+      - Case not found                      → 404
+      - Unknown / invalid provider mode     → 400
+      - Mode-specific config missing        → 400 (never fall back to other mode)
+      - LIVE integration not yet activated  → 400
+    """
     action = await db.recovery_actions.find_one({"recovery_token": token}, {"_id": 0})
     if not action:
         raise HTTPException(status_code=404, detail="Recovery link is invalid or expired.")
@@ -40,10 +111,35 @@ async def _load(token: str):
     case = await db.recovery_cases.find_one({"case_id": action["case_id"]}, {"_id": 0})
     if not case:
         raise HTTPException(status_code=404, detail="Recovery case not found.")
-    config = await get_integration("razorpay", "TEST")
+
+    # Derive provider mode exclusively from authoritative server-side case data.
+    # Client input is never consulted.
+    integration_mode = _mode_for_case(case)
+
+    config = await get_integration("razorpay", integration_mode)
     if not config:
-        raise HTTPException(status_code=400, detail="Payments are not configured.")
+        # Hard fail: never silently fall back from LIVE to TEST or vice versa.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Razorpay {integration_mode} configuration is not available. "
+                "Cannot process the recovery payment."
+            ),
+        )
+
+    # LIVE integration requires an additional explicit owner-activation gate,
+    # mirroring the same gate applied by the live webhook endpoint.
+    if integration_mode == "LIVE" and not config.get("live_activated"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Razorpay LIVE integration is configured but not yet activated "
+                "by the owner. Cannot process the recovery payment."
+            ),
+        )
+
     return action, case, config
+
 
 
 @router.get("/pay/{token}")

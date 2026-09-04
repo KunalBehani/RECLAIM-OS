@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from audit import write_audit
 from auth import get_current_user
@@ -29,6 +29,8 @@ async def read_settings(request: Request):
 @router.put("")
 async def update_settings(request: Request):
     user = await get_current_user(request)
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Only the owner role can modify policy settings and safety switches.")
     body = await request.json()
     current = await get_settings()
     updates = {}

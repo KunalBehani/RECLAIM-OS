@@ -11,24 +11,38 @@ import {
   Menu,
   X,
   Plug,
+  FlaskConical,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../api";
 
 const NAV_SECTIONS = [
-  { label: "Overview", items: [
-    { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard", end: true },
-  ]},
-  { label: "Recovery", items: [
-    { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
-    { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
-  ]},
-  { label: "Operations", items: [
-    { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
-  ]},
-  { label: "Controls", items: [
-    { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
-  ]},
+  {
+    label: "Overview",
+    items: [
+      { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard", end: true },
+    ],
+  },
+  {
+    label: "Recovery",
+    items: [
+      { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
+      { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
+      { to: "/evaluation", label: "Evaluation Lab", icon: FlaskConical, testId: "nav-evaluation" },
+    ],
+  },
+  {
+    label: "Controls",
+    items: [
+      { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
+    ],
+  },
 ];
 
 export default function Layout() {

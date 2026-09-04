@@ -173,10 +173,6 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Tests: test_12 (incremental credit) + test_13 (late-link STRONG upgrade) added to test_phase2b.py. Targeted run 23/23 passed. Full suite 245 passed, 1 skipped, 1 flaky failure (`test_09` — external Emergent email proxy send hiccup under xdist load; verified passing standalone 54s; not a code defect).
 - Final engineering report delivered to user (Phase 2B acceptance criteria complete).
 
-## Next Tasks
-1. Phase 3 (P1): ML Evaluation Lab — precision/recall/F1/calibration, natural-recovery baselines
-2. Phase 4 (P2): LIVE money movement — only after merchant KYC + genuine rzp_live_ credentials (fail-closed by default)
-
 ## Implemented (2026-09-04, UI/UX redesign finish — frontend only, no backend touched)
 - Note: the user's task described a partial redesign (TopBar/OpsContext/Actions/AuditTrail/Policies/SafetyCenter/EvaluationLab pages) — those files DO NOT exist in this repo (verified via filesystem + git log). Per "no fake routes/functionality", the redesign was finished on the actual existing routes only.
 - New shared components: PageHeader.jsx (eyebrow/title/subtitle/actions), EmptyState.jsx, ErrorState.jsx.
@@ -187,9 +183,51 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - index.css: ::selection, global :focus-visible ring, reclaim-enter animation (.animate-enter).
 - Testing agent iteration_12: 12/12 checks pass, 0 console errors on all routes, responsive 390px OK, a11y skip-link + focus rings verified. Its 2 defects fixed after: stage-vs-status filter conflict (status select now clears stage chip) and duplicate IMPORTED key in StatusBadge. KPI label tracking tightened (0.12em).
 - Owner smoke session rotated: test_session_1788530711677 (expires 2026-09-11) — old one expired 2026-09-04T08:07Z.
-3. P1 hygiene: lab-case flag so order_LAB* cases stop inflating active-case counters; persist stage membership on case docs
+
+## Implemented (2026-09-04, Phase 3 — ML Evaluation Lab & Model Calibration)
+- **P1 Hygiene Fixes Completed**:
+  - Explicit `data_stage` (`LIVE`, `TEST`, `LAB`, `SIMULATED`, `IMPORTED`) & `is_lab` flags on case documents.
+  - Test Lab payloads tag `is_lab: True`, isolating `order_LAB*` from real test counters.
+  - Safe migration script `backend/scripts/migrate_phase3_stages.py` backfills historical cases without mutating financial or prediction data.
+  - Stage membership (`funnel_stage`) persisted on case documents (`detected`, `eligible`, `evaluated`, `policy_decided`, `ready`, `executed`, `verifying`, `recovered`).
+- **ML Evaluation Engine (`backend/evaluation.py`)**:
+  - Ground truth binary labeling with explicit exclusion of natural and uncertain outcomes.
+  - Mathematical classification metrics: TP, FP, TN, FN, Accuracy, Precision, Recall, F1, Specificity, NPV, FPR across configurable thresholds.
+  - Calibration: Brier score, 10 probability buckets, Expected Calibration Error (ECE), and Reliability Diagrams.
+  - Threshold Optimization: Sweep across 0.00–1.00 identifying optimal F1 cutoff without modifying production policy.
+  - Curves: ROC curve (with ROC-AUC) and PR curve (with PR-AUC).
+  - Action Impact: Per-action recovery rate and incremental revenue with `ASSOCIATIONAL — NOT CAUSAL` disclaimer.
+  - Natural Recovery Baseline analysis.
+  - Model Comparison: Side-by-side evaluation between `claude-sonnet-4-6` and `heuristic-fallback-v1`.
+  - Transparent Sample Size Gating: Reports `INSUFFICIENT_DATA` (<10) or `DESCRIPTIVE ONLY` (<30); requires >= 100 observations for `WELL_CALIBRATED`.
+  - Platt Scaling (Logistic Calibration): Univariate fitting on train/eval split without modifying raw predictions.
+- **Evaluation API (`backend/routes_evaluation.py`)**:
+  - `GET /api/evaluation/cohorts`, `GET /api/evaluation/summary`, `POST /api/evaluation/runs`, `GET /api/evaluation/runs/{id}`, `DELETE /api/evaluation/runs/{id}`, `POST /api/evaluation/compare`, `GET /api/evaluation/calibration-status`.
+- **Evaluation Lab UI (`frontend/src/pages/EvaluationLab.jsx`)**:
+  - Interactive dashboard with cohort selector, KPI cards, confusion matrix threshold slider, calibration curve, ROC/PR curves, action breakdown, model comparison, and frozen snapshot manager.
+- **Tests**:
+  - `backend/tests/test_phase3_evaluation.py` — 13 tests verifying classification, Brier score, ECE, sample size gating, calibration status, and snapshot immutability. All 13 passed.
+
+## Implemented (2026-09-04, Phase 4A — Production Readiness, Security Hardening & Deployment Preparation)
+- **Security Hardening**:
+  - `PUT /settings` strictly gated to `role: "owner"`. Non-owner roles (`analyst`) receive HTTP 403 Forbidden.
+  - Fail-closed LIVE safety architecture verified: `emergency_stop` defaults to `True`, `live_actions_enabled` defaults to `False`. Real money movement remains blocked.
+  - Secret masking verified: `key_secret` and `webhook_secret` are never returned by any public API endpoint; `key_id` is masked (`rzp_test_********`).
+- **Deployment Hardening**:
+  - Created standardized `backend/.env.example` and `frontend/.env.example` with documented non-sensitive placeholder names.
+  - Frontend `api.js` updated with safe fallback `(process.env.REACT_APP_BACKEND_URL || "") + "/api"` for reverse proxy and subpath deployments.
+  - Updated `README.md` with complete architecture, golden path lifecycle, verified TEST E2E demonstration evidence, and security models.
+- **Automated Test Suite**:
+  - `backend/tests/test_phase4a_security_readiness.py` — 9/9 tests passed covering RBAC, secret masking, HMAC validation, order isolation, and fail-closed LIVE safety gates.
+  - Full suite verified: Phase 3 (13/13 passed) and Phase 4A (9/9 passed).
 
 ## Implemented (2026-09-04, FINAL UI polish pass — frontend only, 0 backend files modified)
 - ReviewQueue.jsx rewritten: 100 large approval cards → compact paginated table (25/page, "Showing X–Y of N", prev/next + page numbers, data-testids review-table/review-pagination/review-prev-page/review-next-page/review-page-N). One primary "Review" action per row (review-open-{case_id}) navigating to Case Detail, which retains ALL existing controls (approve/reject/mark invalid/stop for APPROVAL_PENDING + alternate action execute). Rows show case, right-aligned amount, AI recommendation with estimate label (est. N% — uncalibrated / heuristic assessment), policy rule summary (full reasons in title tooltip), status badge. Exceptions queue table unchanged.
-- Dashboard.jsx KPI hierarchy: 4 primary cards (Revenue at Risk, Verified Recovery, Active Cases, Recovery Rate) in xl:grid-cols-4; Verified Net Recovery + Exceptions moved to a compact secondary strip (kpi-secondary) with preserved testIds (kpi-verified-net, kpi-exceptions), tooltips (title attr), cost-ledger and drill-down behaviors. Loading skeleton updated to 4 cards.
+- Dashboard.jsx KPI hierarchy: 4 primary cards (Revenue at Risk, Verified Recovery, Active Cases, Recovery Rate) in xl:grid-cols-4; Verified Net Recovery+ Exceptions moved to a compact secondary strip (kpi-secondary) with preserved testIds (kpi-verified-net, kpi-exceptions), tooltips (title attr), cost-ledger and drill-down behaviors. Loading skeleton updated to 4 cards.
 - Verified: yarn build 22.25s, 0 console errors, pagination functional (Showing 1–25 → 26–50 of 100), no horizontal overflow at 390px, git status confirms no backend modifications.
+
+## Implemented (2026-09-04, Phase 4B mode isolation)
+- Recovery provider mode is derived from the authoritative case `provider_mode` (`LIVE`/`TEST`), with legacy fallback from provider source.
+- LIVE recovery cases cannot silently fall back to TEST integration credentials.
+- Unknown/missing provider mode fails closed.
+- Added dedicated Phase 4B mode-isolation test coverage (16 tests passed).
