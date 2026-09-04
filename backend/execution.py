@@ -145,7 +145,7 @@ async def execute_action(
     assert_transition(case["status"], "ACTION_EXECUTED")
     await db.recovery_cases.update_one(
         {"case_id": case_id},
-        {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now}},
+        {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now, "funnel_stage": "executed"}},
     )
     return {"action": doc, "duplicate": False}
 
@@ -231,9 +231,9 @@ async def _execute_real_notification(case, spec, idempotency_key, actor, expecte
                      "recipient_masked": mask_email(recipient)},
         policy_rule_reference=(policy_result or {}).get("rule_version"),
     )
-    assert_transition(case["status"], "ACTION_EXECUTED")
+    assert_transition(case.get("status", "EVALUATED"), "ACTION_EXECUTED")
     await db.recovery_cases.update_one(
         {"case_id": case["case_id"]},
-        {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now}},
+        {"$set": {"status": "ACTION_EXECUTED", "action_status": "EXECUTED", "verification_status": "PENDING", "last_evaluated_at": now, "funnel_stage": "executed"}},
     )
     return {"action": doc, "duplicate": False}

@@ -12,6 +12,7 @@ import ReviewQueue from "@/pages/ReviewQueue";
 import Events from "@/pages/Events";
 import Integrations from "@/pages/Integrations";
 import PayRetry from "@/pages/PayRetry";
+import EvaluationLab from "@/pages/EvaluationLab";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -44,6 +45,7 @@ function AppRouter() {
         <Route path="cases/:caseId" element={<CaseDetail />} />
         <Route path="ingest" element={<Ingest />} />
         <Route path="review" element={<ReviewQueue />} />
+        <Route path="evaluation" element={<EvaluationLab />} />
         <Route path="events" element={<Events />} />
         <Route path="integrations" element={<Integrations />} />
       </Route>

@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   Plug,
+  FlaskConical,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../api";
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard", end: true },
   { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
   { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
+  { to: "/evaluation", label: "Evaluation Lab", icon: FlaskConical, testId: "nav-evaluation" },
   { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
   { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
 ];

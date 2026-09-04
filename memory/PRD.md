@@ -173,7 +173,45 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 - Tests: test_12 (incremental credit) + test_13 (late-link STRONG upgrade) added to test_phase2b.py. Targeted run 23/23 passed. Full suite 245 passed, 1 skipped, 1 flaky failure (`test_09` — external Emergent email proxy send hiccup under xdist load; verified passing standalone 54s; not a code defect).
 - Final engineering report delivered to user (Phase 2B acceptance criteria complete).
 
-## Next Tasks
-1. Phase 3 (P1): ML Evaluation Lab — precision/recall/F1/calibration, natural-recovery baselines
-2. Phase 4 (P2): LIVE money movement — only after merchant KYC + genuine rzp_live_ credentials (fail-closed by default)
-3. P1 hygiene: lab-case flag so order_LAB* cases stop inflating active-case counters; persist stage membership on case docs
+## Implemented (2026-09-04, Phase 3 — ML Evaluation Lab & Model Calibration)
+- **P1 Hygiene Fixes Completed**:
+  - Explicit `data_stage` (`LIVE`, `TEST`, `LAB`, `SIMULATED`, `IMPORTED`) & `is_lab` flags on case documents.
+  - Test Lab payloads tag `is_lab: True`, isolating `order_LAB*` from real test counters.
+  - Safe migration script `backend/scripts/migrate_phase3_stages.py` backfills historical cases without mutating financial or prediction data.
+  - Stage membership (`funnel_stage`) persisted on case documents (`detected`, `eligible`, `evaluated`, `policy_decided`, `ready`, `executed`, `verifying`, `recovered`).
+- **ML Evaluation Engine (`backend/evaluation.py`)**:
+  - Ground truth binary labeling with explicit exclusion of natural and uncertain outcomes.
+  - Mathematical classification metrics: TP, FP, TN, FN, Accuracy, Precision, Recall, F1, Specificity, NPV, FPR across configurable thresholds.
+  - Calibration: Brier score, 10 probability buckets, Expected Calibration Error (ECE), and Reliability Diagrams.
+  - Threshold Optimization: Sweep across 0.00–1.00 identifying optimal F1 cutoff without modifying production policy.
+  - Curves: ROC curve (with ROC-AUC) and PR curve (with PR-AUC).
+  - Action Impact: Per-action recovery rate and incremental revenue with `ASSOCIATIONAL — NOT CAUSAL` disclaimer.
+  - Natural Recovery Baseline analysis.
+  - Model Comparison: Side-by-side evaluation between `claude-sonnet-4-6` and `heuristic-fallback-v1`.
+  - Transparent Sample Size Gating: Reports `INSUFFICIENT_DATA` (<10) or `DESCRIPTIVE ONLY` (<30); requires >= 100 observations for `WELL_CALIBRATED`.
+  - Platt Scaling (Logistic Calibration): Univariate fitting on train/eval split without modifying raw predictions.
+- **Evaluation API (`backend/routes_evaluation.py`)**:
+  - `GET /api/evaluation/cohorts`, `GET /api/evaluation/summary`, `POST /api/evaluation/runs`, `GET /api/evaluation/runs/{id}`, `DELETE /api/evaluation/runs/{id}`, `POST /api/evaluation/compare`, `GET /api/evaluation/calibration-status`.
+- **Evaluation Lab UI (`frontend/src/pages/EvaluationLab.jsx`)**:
+  - Interactive dashboard with cohort selector, KPI cards, confusion matrix threshold slider, calibration curve, ROC/PR curves, action breakdown, model comparison, and frozen snapshot manager.
+- **Tests**:
+  - `backend/tests/test_phase3_evaluation.py` — 13 tests verifying classification, Brier score, ECE, sample size gating, calibration status, and snapshot immutability. All 13 passed.
+
+## Implemented (2026-09-04, Phase 4A — Production Readiness, Security Hardening & Deployment Preparation)
+- **Security Hardening**:
+  - `PUT /settings` strictly gated to `role: "owner"`. Non-owner roles (`analyst`) receive HTTP 403 Forbidden.
+  - Fail-closed LIVE safety architecture verified: `emergency_stop` defaults to `True`, `live_actions_enabled` defaults to `False`. Real money movement remains blocked.
+  - Secret masking verified: `key_secret` and `webhook_secret` are never returned by any public API endpoint; `key_id` is masked (`rzp_test_********`).
+- **Deployment Hardening**:
+  - Created standardized `backend/.env.example` and `frontend/.env.example` with documented non-sensitive placeholder names.
+  - Frontend `api.js` updated with safe fallback `(process.env.REACT_APP_BACKEND_URL || "") + "/api"` for reverse proxy and subpath deployments.
+  - Updated `README.md` with complete architecture, golden path lifecycle, verified TEST E2E demonstration evidence, and security models.
+- **Automated Test Suite**:
+  - `backend/tests/test_phase4a_security_readiness.py` — 9/9 tests passed covering RBAC, secret masking, HMAC validation, order isolation, and fail-closed LIVE safety gates.
+  - Full suite verified: Phase 3 (13/13 passed) and Phase 4A (9/9 passed).
+
+## Next Tasks (Phase 4B)
+1. Merchant KYC & Business Verification with Razorpay.
+2. Obtain genuine Razorpay `rzp_live_...` credentials.
+3. Configure and activate LIVE mode under owner supervision.
+4. Execute initial small real-money transaction test to prove end-to-end LIVE flow.

@@ -259,7 +259,27 @@ async def reevaluate_order(order_key: str, trigger, actor="system", allow_llm=Tr
             return {"result": "case_updated", "case_id": any_case["case_id"]}
         return {"result": "payment_recorded", "order_key": order_key}
 
-    latest_fail = failed[-1]
+    # Phase 3 explicit data_stage classification & stage persistence
+    is_lab = bool(
+        latest_fail.get("is_lab")
+        or latest_fail.get("data_stage") == "LAB"
+        or str(order_key).startswith("order_LAB")
+        or str(latest_fail.get("payment_id", "")).startswith("pay_LAB")
+        or latest_fail.get("source") == "TEST_LAB"
+    )
+    if is_lab:
+        data_stage = "LAB"
+    elif latest_fail.get("simulated") or latest_fail.get("source") in ("SIMULATOR", "TEST"):
+        data_stage = "SIMULATED"
+    elif latest_fail.get("source") in ("CSV_UPLOAD", "XLSX_UPLOAD", "FILE_IMPORT"):
+        data_stage = "IMPORTED"
+    elif latest_fail.get("source") == "RAZORPAY_LIVE" or latest_fail.get("source_mode") == "LIVE":
+        data_stage = "LIVE"
+    elif latest_fail.get("source") == "RAZORPAY_TEST" or latest_fail.get("source_mode") == "TEST":
+        data_stage = "TEST"
+    else:
+        data_stage = "TEST"
+
     case_doc = {
         "case_id": f"case_{uuid.uuid4().hex[:12]}",
         "order_key": order_key,
@@ -270,6 +290,9 @@ async def reevaluate_order(order_key: str, trigger, actor="system", allow_llm=Tr
         "amount_at_risk": latest_fail.get("amount"),
         "currency": latest_fail.get("currency"),
         "status": "OPEN",
+        "data_stage": data_stage,
+        "is_lab": is_lab,
+        "funnel_stage": "detected",
         "reason_created": (
             f"Payment attempt {latest_fail['payment_id']} failed "
             f"({latest_fail.get('failure_code') or 'no failure code'}) and no successful settlement exists for this order."
@@ -468,7 +491,12 @@ async def close_case_on_success(case: dict, success_attempt=None, actor="verific
                     "Natural recovery — NOT counted as system-recovered revenue."
                 )
 
-    updates.update({"verification_evidence": evidence, "closed_at": now_iso(), "action_status": "CLOSED"})
+    updates.update({
+        "verification_evidence": evidence,
+        "closed_at": now_iso(),
+        "action_status": "CLOSED",
+        "funnel_stage": "recovered" if updates["status"] == "VERIFIED_RECOVERED" else "verifying",
+    })
     assert_transition(case["status"], updates["status"])
     await db.recovery_cases.update_one({"case_id": case["case_id"]}, {"$set": updates})
     await write_audit(
@@ -566,6 +594,7 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
             "evidence": analysis["evidence"],
             "model_version": analysis["model_version"],
             "features": analysis["features"],
+            "funnel_stage": "evaluated",
         }},
     )
     await write_audit(
@@ -599,7 +628,8 @@ async def run_case_pipeline(case_id: str, actor="system", allow_llm=True) -> dic
     case_now = await db.recovery_cases.find_one({"case_id": case_id}, {"_id": 0})
     actions = await db.recovery_actions.find({"case_id": case_id}, {"_id": 0}).to_list(100)
     policy_result = evaluate_policy(case_now, rec, actions, settings)
-    await db.recovery_cases.update_one({"case_id": case_id}, {"$set": {"policy_result": policy_result}})
+    next_stage = "ready" if policy_result["decision"] == "ALLOW" else "policy_decided"
+    await db.recovery_cases.update_one({"case_id": case_id}, {"$set": {"policy_result": policy_result, "funnel_stage": next_stage}})
     await write_audit(
         case_id=case_id,
         actor="policy-engine",
