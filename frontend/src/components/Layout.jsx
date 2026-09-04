@@ -15,12 +15,20 @@ import {
 import { useAuth } from "../context/AuthContext";
 import api from "../api";
 
-const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard", end: true },
-  { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
-  { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
-  { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
-  { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
+const NAV_SECTIONS = [
+  { label: "Overview", items: [
+    { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard", end: true },
+  ]},
+  { label: "Recovery", items: [
+    { to: "/review", label: "Review Queue", icon: ClipboardCheck, testId: "nav-review" },
+    { to: "/ingest", label: "Ingest Data", icon: UploadCloud, testId: "nav-ingest" },
+  ]},
+  { label: "Operations", items: [
+    { to: "/events", label: "Events & Simulator", icon: Radio, testId: "nav-events" },
+  ]},
+  { label: "Controls", items: [
+    { to: "/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },
+  ]},
 ];
 
 export default function Layout() {
@@ -46,6 +54,9 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-slate-900 focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-white">
+        Skip to content
+      </a>
       <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-slate-200 bg-white px-4 lg:hidden">
         <button
           data-testid="mobile-menu-btn"
@@ -93,23 +104,32 @@ export default function Layout() {
             <X className="h-4 w-4" />
           </button>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              data-testid={item.testId}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
-                  isActive ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`
-              }
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
-            </NavLink>
+        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Primary">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.label}>
+              <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                {section.label}
+              </div>
+              <div className="space-y-1">
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    data-testid={item.testId}
+                    onClick={() => setSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
+                        isActive ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      }`
+                    }
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="border-t border-slate-100 px-4 py-4 space-y-3">
@@ -153,7 +173,7 @@ export default function Layout() {
             EMERGENCY STOP ENABLED — all autonomous recovery actions are halted by policy
           </div>
         )}
-        <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        <main id="main-content" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
           <Outlet />
         </main>
       </div>

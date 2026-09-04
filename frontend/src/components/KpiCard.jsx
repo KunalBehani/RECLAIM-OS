@@ -9,7 +9,7 @@ export default function KpiCard({ label, tooltip, onClick, accent = "border-l-sl
       className={`relative w-full rounded-xl border border-slate-200 border-l-4 ${accent} bg-white p-6 text-left transition-transform duration-300 ease-out hover:-translate-y-1 hover:shadow-md hover:border-slate-300 ${onClick ? "cursor-pointer" : ""}`}
     >
       <div className="flex items-center gap-1.5">
-        <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{label}</div>
+        <div className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{label}</div>
         {tooltip && (
           <span className="group relative inline-flex" onClick={(e) => e.stopPropagation()}>
             <Info className="h-3.5 w-3.5 text-slate-300 transition-colors duration-200 hover:text-slate-500" />

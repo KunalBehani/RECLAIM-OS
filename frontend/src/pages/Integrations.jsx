@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Copy, FlaskConical, RefreshCcw } from "lucide-react";
 import { toast } from "sonner";
 import api from "../api";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 
 const LAB_TESTS = [
@@ -266,12 +267,8 @@ export default function Integrations() {
 
   return (
     <div className="space-y-10" data-testid="integrations-page">
-      <div>
-        <h1 className="font-heading text-3xl font-medium tracking-tight text-slate-900">Integrations</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Provider connections, webhook configuration, integration health and the developer test lab.
-        </p>
-      </div>
+      <PageHeader eyebrow="Controls" title="Integrations"
+        subtitle="Provider connections, webhook configuration, integration health and the developer test lab." />
 
       <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="razorpay-card">
         <div className="flex flex-wrap items-center justify-between gap-3">

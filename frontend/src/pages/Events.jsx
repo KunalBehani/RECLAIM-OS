@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FlaskConical, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import api from "../api";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 
 const SCENARIOS = [
@@ -75,12 +76,8 @@ export default function Events() {
 
   return (
     <div className="space-y-10" data-testid="events-page">
-      <div>
-        <h1 className="font-heading text-3xl font-medium tracking-tight text-slate-900">Events & Simulator</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Real-time ingestion with signature verification, idempotency and replay protection — plus a clearly labeled simulator for development and demos.
-        </p>
-      </div>
+      <PageHeader eyebrow="Operations" title="Events & Simulator"
+        subtitle="Real-time ingestion with signature verification, idempotency and replay protection — plus a clearly labeled simulator for development and demos." />
 
       {config && (
         <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="webhook-config">

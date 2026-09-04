@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FileSpreadsheet, Loader2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import api from "../api";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 
 const REQUIRED_FIELDS = new Set(["amount", "status"]);
@@ -109,12 +110,8 @@ export default function Ingest() {
 
   return (
     <div className="space-y-10" data-testid="ingest-page">
-      <div>
-        <h1 className="font-heading text-3xl font-medium tracking-tight text-slate-900">Batch Data Ingestion</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Upload CSV or Excel merchant data. Nothing enters financial totals until you review the field mapping and the validation report.
-        </p>
-      </div>
+      <PageHeader eyebrow="Recovery" title="Batch Data Ingestion"
+        subtitle="Upload CSV or Excel merchant data. Nothing enters financial totals until you review the field mapping and the validation report." />
 
       {!upload && (
         <button

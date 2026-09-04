@@ -33,7 +33,6 @@ const STATUS_STYLES = {
   AUTO_APPROVED: "bg-green-50 text-green-700 border-green-200",
   MANUAL_TRIGGER: "bg-blue-50 text-blue-700 border-blue-200",
   INVALID_CASE: "bg-slate-100 text-slate-500 border-slate-200",
-  IMPORTED: "bg-green-50 text-green-700 border-green-200",
   IMPORTING: "bg-blue-50 text-blue-700 border-blue-200",
   IMPORT_FAILED: "bg-red-50 text-red-700 border-red-200",
   MAPPING_REVIEW: "bg-amber-50 text-amber-700 border-amber-200",
@@ -48,6 +47,10 @@ const STATUS_STYLES = {
   FAILED: "bg-red-50 text-red-700 border-red-200",
   RECEIVED: "bg-blue-50 text-blue-700 border-blue-200",
   IGNORED_UNSUPPORTED: "bg-slate-100 text-slate-600 border-slate-200",
+  STRONG: "bg-green-600 text-white border-green-600",
+  MODERATE: "bg-blue-50 text-blue-700 border-blue-200",
+  UNCERTAIN: "bg-amber-50 text-amber-700 border-amber-200",
+  REAL: "bg-blue-50 text-blue-700 border-blue-200",
 };
 
 export default function StatusBadge({ value, className = "" }) {

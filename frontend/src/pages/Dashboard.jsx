@@ -7,6 +7,7 @@ import {
 import { ChevronRight, Search, X } from "lucide-react";
 import api from "../api";
 import KpiCard from "../components/KpiCard";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 import { formatMoney, Money, MoneyMap } from "../components/Money";
 
@@ -97,36 +98,33 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-10" data-testid="dashboard">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-medium tracking-tight text-slate-900">Recovery Dashboard</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Traceable revenue at risk, verified outcomes, and controlled recovery actions.
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="source-summary">
-            {charts.sources.map((s) => (
-              <span key={s.source} className="flex items-center gap-1.5">
-                <StatusBadge value={s.source} />
-                <span className="text-xs text-slate-500 tabular-nums">{s.count}</span>
-              </span>
-            ))}
-            {charts.sources.length === 0 && <span className="text-xs text-slate-400">No data sources yet</span>}
+      <PageHeader eyebrow="Overview" title="Recovery Dashboard" testId="dashboard-header"
+        subtitle="Traceable revenue at risk, verified outcomes, and controlled recovery actions."
+        actions={
+          <div className="text-right">
+            <div className="flex justify-end gap-1" data-testid="range-selector">
+              {[7, 30, 90].map((d) => (
+                <button key={d} onClick={() => setDays(d)} data-testid={`range-${d}d-btn`}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors duration-200 ${days === d ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  {d}D
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-slate-400" data-testid="last-updated">
+              Last updated: {updatedAt ? updatedAt.toLocaleTimeString("en-GB") : "—"}
+            </div>
           </div>
+        }>
+        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="source-summary">
+          {charts.sources.map((s) => (
+            <span key={s.source} className="flex items-center gap-1.5">
+              <StatusBadge value={s.source} />
+              <span className="text-xs text-slate-500 tabular-nums">{s.count}</span>
+            </span>
+          ))}
+          {charts.sources.length === 0 && <span className="text-xs text-slate-400">No data sources yet</span>}
         </div>
-        <div className="text-right">
-          <div className="flex justify-end gap-1" data-testid="range-selector">
-            {[7, 30, 90].map((d) => (
-              <button key={d} onClick={() => setDays(d)} data-testid={`range-${d}d-btn`}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors duration-200 ${days === d ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                {d}D
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 text-xs text-slate-400" data-testid="last-updated">
-            Last updated: {updatedAt ? updatedAt.toLocaleTimeString("en-GB") : "—"}
-          </div>
-        </div>
-      </div>
+      </PageHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-6">
         <KpiCard label="Revenue Currently at Risk" accent="border-l-amber-500" testId="kpi-revenue-at-risk"
@@ -361,7 +359,7 @@ export default function Dashboard() {
                 placeholder="Search title, order, payment…"
                 className="w-full sm:w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition-colors duration-200 focus:border-slate-400" />
             </div>
-            <select data-testid="case-status-filter" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+            <select data-testid="case-status-filter" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, stage: "" }))}
               className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 outline-none">
               <option value="">All states</option>
               {["OPEN", "EVALUATED", "APPROVAL_PENDING", "ACTION_EXECUTED", "VERIFIED_RECOVERED", "NATURALLY_RECOVERED", "NOT_RECOVERED", "STOPPED", "INVALID"].map((s) => (

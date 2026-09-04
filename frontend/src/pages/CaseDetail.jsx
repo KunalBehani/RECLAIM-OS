@@ -279,6 +279,38 @@ export default function CaseDetail() {
         </div>
 
         <div className="space-y-6">
+          {c.status === "VERIFIED_RECOVERED" && c.attribution === "SYSTEM_ACTION" && (
+            <section className="rounded-xl border border-green-200 bg-green-50/70 p-6" data-testid="attribution-card">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-green-700">Recovery Attribution</div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <StatusBadge value={c.attribution_strength} />
+                <span className="flex items-center gap-1 text-xs font-medium text-green-700">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Provider verified
+                </span>
+              </div>
+              <div className="mt-3 font-heading text-3xl font-medium tabular-nums text-green-900" data-testid="attribution-amount">
+                <Money amount={c.recovered_amount} currency={c.currency} />
+              </div>
+              <div className="mt-2 text-xs text-green-800">
+                Attributed to: <span className="font-semibold">{(c.attributed_action || "").replace(/_/g, " ")}</span>
+              </div>
+              {c.verification_evidence?.success_payment_id && (
+                <div className="mt-1 font-mono text-[10px] text-green-700/80">
+                  settlement {c.verification_evidence.success_payment_id} · {c.verification_evidence.source}
+                </div>
+              )}
+            </section>
+          )}
+          {c.status === "NATURALLY_RECOVERED" && (
+            <section className="rounded-xl border border-slate-200 bg-slate-50 p-6" data-testid="attribution-card">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Recovery Attribution</div>
+              <div className="mt-3"><StatusBadge value={c.attribution_strength || "NONE"} /></div>
+              <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                Natural recovery — the customer settled without a creditable system action. This revenue is tracked
+                separately and is <span className="font-semibold">not</span> counted as system-recovered.
+              </p>
+            </section>
+          )}
           <section className="rounded-xl border border-slate-200 bg-white p-6" data-testid="case-summary">
             <h3 className="font-heading text-base font-medium text-slate-900">Summary</h3>
             <dl className="mt-4 space-y-3 text-sm">

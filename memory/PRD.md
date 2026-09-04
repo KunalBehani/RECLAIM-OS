@@ -176,4 +176,15 @@ Modular monolith: React frontend, FastAPI backend, MongoDB (motor).
 ## Next Tasks
 1. Phase 3 (P1): ML Evaluation Lab — precision/recall/F1/calibration, natural-recovery baselines
 2. Phase 4 (P2): LIVE money movement — only after merchant KYC + genuine rzp_live_ credentials (fail-closed by default)
+
+## Implemented (2026-09-04, UI/UX redesign finish — frontend only, no backend touched)
+- Note: the user's task described a partial redesign (TopBar/OpsContext/Actions/AuditTrail/Policies/SafetyCenter/EvaluationLab pages) — those files DO NOT exist in this repo (verified via filesystem + git log). Per "no fake routes/functionality", the redesign was finished on the actual existing routes only.
+- New shared components: PageHeader.jsx (eyebrow/title/subtitle/actions), EmptyState.jsx, ErrorState.jsx.
+- Layout.jsx: grouped sidebar nav (OVERVIEW / RECOVERY / OPERATIONS / CONTROLS), skip-to-content link, aria-label, main#main-content.
+- PageHeader adopted by Dashboard, ReviewQueue, Events, Ingest, Integrations. ReviewQueue load failure now shows ErrorState with retry (was silently empty — data-integrity fix); empty approval list uses EmptyState.
+- CaseDetail: prominent RECOVERY ATTRIBUTION card (attribution-card) — STRONG/MODERATE badge, Provider verified, amount, attributed action, settlement ref; honest NATURALLY_RECOVERED variant. StatusBadge: STRONG/MODERATE/UNCERTAIN/REAL added.
+- PayRetry: brand mark, TEST MODE badge (pay-retry-mode-badge), currency-aware amount via Intl.
+- index.css: ::selection, global :focus-visible ring, reclaim-enter animation (.animate-enter).
+- Testing agent iteration_12: 12/12 checks pass, 0 console errors on all routes, responsive 390px OK, a11y skip-link + focus rings verified. Its 2 defects fixed after: stage-vs-status filter conflict (status select now clears stage chip) and duplicate IMPORTED key in StatusBadge. KPI label tracking tightened (0.12em).
+- Owner smoke session rotated: test_session_1788530711677 (expires 2026-09-11) — old one expired 2026-09-04T08:07Z.
 3. P1 hygiene: lab-case flag so order_LAB* cases stop inflating active-case counters; persist stage membership on case docs

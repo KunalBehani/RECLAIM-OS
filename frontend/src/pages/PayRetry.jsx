@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 import axios from "axios";
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -55,8 +56,18 @@ export default function PayRetry() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] p-6" data-testid="pay-retry-page">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-widest text-[#072654]">RECLAIM OS</p>
-        <h1 className="mt-2 text-xl font-semibold text-slate-900">Complete your payment</h1>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900">
+              <ShieldCheck className="h-4 w-4 text-white" />
+            </div>
+            <p className="text-xs font-bold uppercase tracking-widest text-slate-900">RECLAIM OS</p>
+          </div>
+          {state.mode === "TEST" && (
+            <span data-testid="pay-retry-mode-badge" className="rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-700">Test mode</span>
+          )}
+        </div>
+        <h1 className="mt-5 font-heading text-2xl font-medium tracking-tight text-slate-900">Complete your payment</h1>
 
         {state.status === "loading" && <p className="mt-4 text-sm text-slate-500" data-testid="pay-retry-loading">Loading secure checkout…</p>}
         {state.status === "error" && <p className="mt-4 text-sm text-red-600" data-testid="pay-retry-error">{state.detail}</p>}
@@ -76,7 +87,7 @@ export default function PayRetry() {
             ) : (
               <>
                 <p className="text-sm text-slate-600">Order <span className="font-mono text-xs">{state.order_id}</span></p>
-                <p className="mt-1 text-2xl font-bold text-slate-900" data-testid="pay-retry-amount">₹{((state.amount_paise || 0) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                <p className="mt-2 font-heading text-3xl font-medium tabular-nums text-slate-900" data-testid="pay-retry-amount">{new Intl.NumberFormat(state.currency === "INR" ? "en-IN" : "en-US", { style: "currency", currency: state.currency || "INR" }).format((state.amount_paise || 0) / 100)}</p>
                 {state.note && <p className="mt-2 text-xs text-amber-700">{state.note}</p>}
                 <button data-testid="pay-retry-launch-btn" onClick={launch} disabled={state.status === "opening"}
                   className="mt-5 w-full rounded-lg bg-[#072654] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#0a3168] disabled:opacity-40">

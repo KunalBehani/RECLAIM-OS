@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import StatusBadge from "../components/StatusBadge";
+import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
+import ErrorState from "../components/ErrorState";
 import { Money, formatMoney } from "../components/Money";
 
 const ALTERNATE_ACTIONS = ["SCHEDULED_RECHECK", "SAFE_PAYMENT_RETRY", "SEND_RECOVERY_LINK", "CUSTOMER_REMINDER", "ESCALATE_HUMAN", "STOP_RECOVERY"];
@@ -13,7 +16,7 @@ export default function ReviewQueue() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    api.get("/review/queue").then((res) => setQueue(res.data)).catch(() => setQueue({ approval_pending: [], exceptions: [], counts: {} }));
+    api.get("/review/queue").then((res) => setQueue(res.data)).catch(() => setQueue({ error: true }));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -45,23 +48,29 @@ export default function ReviewQueue() {
     return <div className="h-64 animate-pulse rounded-xl bg-slate-200" data-testid="review-loading" />;
   }
 
+  if (queue.error) {
+    return (
+      <div className="space-y-10" data-testid="review-queue">
+        <PageHeader eyebrow="Recovery" title="Human Review Queue"
+          subtitle="AI recommends — humans approve. A human approval can execute an APPROVAL-gated action, but can never override a policy BLOCK or STOP." />
+        <ErrorState testId="review-error" title="Review queue unavailable"
+          detail="The queue could not be loaded. No data has been changed." onRetry={load} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-10" data-testid="review-queue">
-      <div>
-        <h1 className="font-heading text-3xl font-medium tracking-tight text-slate-900">Human Review Queue</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          AI recommends — humans approve. A human approval can execute an APPROVAL-gated action, but can never override a policy BLOCK or STOP.
-        </p>
-      </div>
+      <PageHeader eyebrow="Recovery" title="Human Review Queue"
+        subtitle="AI recommends — humans approve. A human approval can execute an APPROVAL-gated action, but can never override a policy BLOCK or STOP." />
 
       <section className="space-y-4">
         <h2 className="font-heading text-lg font-medium text-slate-900">
           Awaiting approval <span className="ml-2 rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-bold text-orange-700 border border-orange-200">{queue.counts.approval_pending}</span>
         </h2>
         {queue.approval_pending.length === 0 && (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-400" data-testid="review-empty">
-            No cases awaiting human approval.
-          </div>
+          <EmptyState testId="review-empty" title="No cases awaiting human approval"
+            hint="When the policy engine requests human review, cases appear here." />
         )}
         {queue.approval_pending.map((c) => (
           <div key={c.case_id} className="rounded-xl border border-orange-200 bg-white p-6" data-testid={`review-case-${c.case_id}`}>
