@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from motor.motor_asyncio import AsyncIOMotorClient
 
 try:
     from dotenv import load_dotenv
