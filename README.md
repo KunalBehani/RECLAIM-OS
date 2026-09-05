@@ -2,6 +2,8 @@
 
 **AI Revenue Recovery, with Control.**
 
+🌐 **Live Demo:** https://reclaim-verify.emergent.host
+
 > Revenue at risk doesn't have to become revenue lost.
 
 RECLAIM OS is an intelligent, policy-bounded revenue recovery platform for merchants. It detects genuinely unresolved revenue at risk (primary use case: **failed payment recovery**), analyzes recoverability, applies deterministic policy rules, executes controlled recovery actions, independently verifies payment outcomes via payment providers, and attributes recovered revenue using verifiable provider evidence.
